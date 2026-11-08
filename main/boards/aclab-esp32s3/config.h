@@ -50,6 +50,6 @@
 #define DISPLAY_SPI_MODE                0
 
 // Thoi gian cho tu dong tat man hinh vao che do tiet kiem dien (giay)
-#define POWER_SAVE_SLEEP_SECONDS 45
+#define POWER_SAVE_SLEEP_SECONDS 300
 
 #endif // _BOARD_CONFIG_H_
