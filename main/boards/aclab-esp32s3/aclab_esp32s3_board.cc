@@ -17,10 +17,53 @@
 #include <esp_lcd_panel_vendor.h>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
+#include "esp_lcd_ili9341.h"
 #include <driver/spi_common.h>
 #include <driver/gpio.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #define TAG "AclabEsp32S3Board"
+
+// ST7735 Hardware initialization commands (required for ST7735 internal charge pump & VCOM)
+static const uint8_t st7735_cmd_b1[] = {0x05, 0x3A, 0x3A};
+static const uint8_t st7735_cmd_b2[] = {0x05, 0x3A, 0x3A};
+static const uint8_t st7735_cmd_b3[] = {0x05, 0x3A, 0x3A, 0x05, 0x3A, 0x3A};
+static const uint8_t st7735_cmd_b4[] = {0x03};
+static const uint8_t st7735_cmd_c0[] = {0x44, 0x04, 0x04};
+static const uint8_t st7735_cmd_c1[] = {0xC0};
+static const uint8_t st7735_cmd_c2[] = {0x0D, 0x00};
+static const uint8_t st7735_cmd_c3[] = {0x8D, 0x6A};
+static const uint8_t st7735_cmd_c4[] = {0x8D, 0xEE};
+static const uint8_t st7735_cmd_c5[] = {0x08};
+static const uint8_t st7735_cmd_e0[] = {0x0F, 0x10, 0x03, 0x03, 0x07, 0x02, 0x00, 0x02,
+                                        0x07, 0x0C, 0x13, 0x38, 0x0A, 0x0E, 0x03, 0x10};
+static const uint8_t st7735_cmd_e1[] = {0x10, 0x0B, 0x04, 0x04, 0x10, 0x03, 0x00, 0x03,
+                                        0x03, 0x09, 0x17, 0x33, 0x0B, 0x0C, 0x06, 0x10};
+static const uint8_t st7735_cmd_35[] = {0x00};
+static const uint8_t st7735_cmd_3a[] = {0x05};
+static const uint8_t st7735_cmd_36[] = {0xC8};
+
+static const ili9341_lcd_init_cmd_t st7735_vendor_init[] = {
+    {0x11, NULL, 0, 120},  // Sleep out, Delay 120ms
+    {0xB1, st7735_cmd_b1, sizeof(st7735_cmd_b1), 0},
+    {0xB2, st7735_cmd_b2, sizeof(st7735_cmd_b2), 0},
+    {0xB3, st7735_cmd_b3, sizeof(st7735_cmd_b3), 0},
+    {0xB4, st7735_cmd_b4, sizeof(st7735_cmd_b4), 0},
+    {0xC0, st7735_cmd_c0, sizeof(st7735_cmd_c0), 0},
+    {0xC1, st7735_cmd_c1, sizeof(st7735_cmd_c1), 0},
+    {0xC2, st7735_cmd_c2, sizeof(st7735_cmd_c2), 0},
+    {0xC3, st7735_cmd_c3, sizeof(st7735_cmd_c3), 0},
+    {0xC4, st7735_cmd_c4, sizeof(st7735_cmd_c4), 0},
+    {0xC5, st7735_cmd_c5, sizeof(st7735_cmd_c5), 0},
+    {0xE0, st7735_cmd_e0, sizeof(st7735_cmd_e0), 0},
+    {0xE1, st7735_cmd_e1, sizeof(st7735_cmd_e1), 0},
+    {0x35, st7735_cmd_35, sizeof(st7735_cmd_35), 0},
+    {0x3A, st7735_cmd_3a, sizeof(st7735_cmd_3a), 0},
+    {0x36, st7735_cmd_36, sizeof(st7735_cmd_36), 0},
+    {0x29, NULL, 0, 0},  // Display on
+    {0x2C, NULL, 0, 0},  // Memory write
+};
 
 class AclabEsp32S3Board : public WifiBoard {
 private:
@@ -57,15 +100,22 @@ private:
         io_config.lcd_param_bits = 8;
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI3_HOST, &io_config, &panel_io));
 
-        ESP_LOGD(TAG, "Install ST7735 LCD driver");
+        ESP_LOGD(TAG, "Install ST7735 LCD driver with vendor init");
+        static const ili9341_vendor_config_t vendor_config = {
+            .init_cmds = st7735_vendor_init,
+            .init_cmds_size = sizeof(st7735_vendor_init) / sizeof(ili9341_lcd_init_cmd_t),
+        };
+
         esp_lcd_panel_dev_config_t panel_config = {};
         panel_config.reset_gpio_num = DISPLAY_RST_PIN;
         panel_config.rgb_ele_order = DISPLAY_RGB_ORDER;
         panel_config.bits_per_pixel = 16;
+        panel_config.vendor_config = (void*)&vendor_config;
         
-        ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(panel_io, &panel_config, &panel));
+        ESP_ERROR_CHECK(esp_lcd_new_panel_ili9341(panel_io, &panel_config, &panel));
         
         esp_lcd_panel_reset(panel);
+        vTaskDelay(pdMS_TO_TICKS(120));
         esp_lcd_panel_init(panel);
         esp_lcd_panel_invert_color(panel, DISPLAY_INVERT_COLOR);
         esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
