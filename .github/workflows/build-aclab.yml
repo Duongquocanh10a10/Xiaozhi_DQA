@@ -1,0 +1,37 @@
+name: Build ACLAB ST7735 Firmware
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ACLAB ESP32-S3 (ST7735 128x160)
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:release-v6.1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build Firmware
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          source "$IDF_PATH/export.sh"
+          python3 scripts/build.py aclab-esp32s3 --create-zip
+
+      - name: Upload merged binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: aclab_esp32s3_st7735_firmware
+          path: |
+            build/merged-binary.bin
+            releases/*.zip
