@@ -1,0 +1,12 @@
+{
+    "type": "aclab-esp32s3",
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "aclab-esp32s3",
+            "sdkconfig_append": [
+                "CONFIG_LCD_ST7735_128X160=y"
+            ]
+        }
+    ]
+}
