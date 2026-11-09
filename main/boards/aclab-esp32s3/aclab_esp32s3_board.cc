@@ -8,6 +8,8 @@
 #include "mcp_server.h"
 #include "lamp_controller.h"
 #include "servo_controller.h"
+#include "dht11.h"
+#include "env_display_manager.h"
 #include "led/single_led.h"
 #include "power_save_timer.h"
 #include "settings.h"
@@ -71,6 +73,10 @@ private:
     Button volume_up_button_;
     Button volume_down_button_;
     Button touch_button_;
+    Button mode_button_1_;
+    Button mode_button_2_;
+    Dht11 dht11_;
+    EnvDisplayManager* env_display_ = nullptr;
     LcdDisplay* display_ = nullptr;
     PowerSaveTimer* power_save_timer_ = nullptr;
 
@@ -175,6 +181,23 @@ private:
             auto& app = Application::GetInstance();
             app.StopListening();
         });
+
+        // Nut 1 (GPIO 17): Chuyen vong tron qua cac mode 1 -> 2 -> 3 -> 1
+        // Mode 1: AI Xiaozhi, Mode 2: Nhiet do + Do thi, Mode 3: Do am + Do thi
+        mode_button_1_.OnClick([this]() {
+            power_save_timer_->WakeUp();
+            if (env_display_) {
+                env_display_->CycleMode123();
+            }
+        });
+
+        // Nut 2 (GPIO 21): Chuyen truc tiep sang Mode 4 (Xem song song ca Nhiet do & Do am)
+        mode_button_2_.OnClick([this]() {
+            power_save_timer_->WakeUp();
+            if (env_display_) {
+                env_display_->SwitchToMode4();
+            }
+        });
     }
 
     void InitializePowerSaveTimer() {
@@ -204,6 +227,53 @@ private:
         static LampController lamp(LAMP_GPIO);
         // Ngoai vi Servo tren GPIO 18
         static ServoController servo(SERVO_GPIO);
+
+        auto& mcp_server = McpServer::GetInstance();
+
+        // MCP Tool 1: Doc gia tri nhiet do
+        mcp_server.AddTool("self.sensor.get_temperature",
+            "Doc gia tri nhiet do moi truong phong hien tai (do C) tu cam bien DHT11.",
+            PropertyList(), [this](const PropertyList& properties) {
+                float t = dht11_.GetTemperature();
+                char buf[32];
+                snprintf(buf, sizeof(buf), "%.1f", t);
+                return std::string(buf);
+            });
+
+        // MCP Tool 2: Doc gia tri do am
+        mcp_server.AddTool("self.sensor.get_humidity",
+            "Doc gia tri do am khong khi phong hien tai (%) tu cam bien DHT11.",
+            PropertyList(), [this](const PropertyList& properties) {
+                float h = dht11_.GetHumidity();
+                char buf[32];
+                snprintf(buf, sizeof(buf), "%.1f", h);
+                return std::string(buf);
+            });
+
+        // MCP Tool 3: Doc tong hop ca hai thong so
+        mcp_server.AddTool("self.sensor.get_environment",
+            "Doc ca hai thong so nhiet do phong (do C) va do am (%) tu cam bien DHT11.",
+            PropertyList(), [this](const PropertyList& properties) {
+                float t, h;
+                dht11_.Read(t, h);
+                char buf[64];
+                snprintf(buf, sizeof(buf), "{\"temperature\": %.1f, \"humidity\": %.1f}", t, h);
+                return std::string(buf);
+            });
+
+        // MCP Tool 4: Chuyen doi che do hien thi man hinh qua giong noi hoac server
+        mcp_server.AddTool("self.screen.set_display_mode",
+            "Chuyen che do hien thi TFT: 1 (AI Xiaozhi), 2 (Do thi Nhiet do), 3 (Do thi Do am), 4 (Tong hop Nhiet do & Do am).",
+            PropertyList({
+                Property("mode", kPropertyTypeInteger, 1, 4)
+            }), [this](const PropertyList& properties) {
+                int mode = properties["mode"].value<int>();
+                if (env_display_ && mode >= 1 && mode <= 4) {
+                    env_display_->SetMode((DisplayMode)mode);
+                    return true;
+                }
+                return false;
+            });
     }
 
 public:
@@ -211,13 +281,20 @@ public:
         boot_button_(BOOT_BUTTON_GPIO),
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO),
-        touch_button_(TOUCH_BUTTON_GPIO) {
+        touch_button_(TOUCH_BUTTON_GPIO),
+        mode_button_1_(MODE_BUTTON_1_GPIO),
+        mode_button_2_(MODE_BUTTON_2_GPIO),
+        dht11_(DHT11_DATA_GPIO) {
         
         InitializeSpi();
         InitializeLcdDisplay();
         InitializeButtons();
         InitializeTools();
         InitializePowerSaveTimer();
+
+        // Khoi dong trinh quan ly 4 che do hien thi moi truong (DHT11 + Charts)
+        env_display_ = new EnvDisplayManager(display_, &dht11_);
+        env_display_->Start();
 
         if (DISPLAY_BACKLIGHT_PIN != GPIO_NUM_NC) {
             GetBacklight()->RestoreBrightness();

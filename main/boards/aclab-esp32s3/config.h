@@ -23,6 +23,13 @@
 #define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_2
 #define TOUCH_BUTTON_GPIO       GPIO_NUM_3
 
+// Nut nhan chuyen che do giao dien TFT (Mode 1, 2, 3, 4)
+#define MODE_BUTTON_1_GPIO      GPIO_NUM_17 // Nut 1: Chuyen vong tron Mode 1 -> 2 -> 3 -> 1
+#define MODE_BUTTON_2_GPIO      GPIO_NUM_21 // Nut 2: Chuyen truc tiep Mode 4 (Xem ca Nhiet do & Do am)
+
+// Cam bien nhiet do - do am DHT11
+#define DHT11_DATA_GPIO         GPIO_NUM_8
+
 // Ngoai vi chap hanh (LED & Servo)
 #define BUILTIN_LED_GPIO        GPIO_NUM_38
 #define LAMP_GPIO               GPIO_NUM_38
