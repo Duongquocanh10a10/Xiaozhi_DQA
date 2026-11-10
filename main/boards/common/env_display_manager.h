@@ -49,15 +49,26 @@ private:
 
     TaskHandle_t update_task_handle_ = nullptr;
 
+    void EnsureViews() {
+        if (overlay_container_ != nullptr) return;
+        CreateViews();
+    }
+
     void CreateViews() {
         if (!display_) return;
-        DisplayLockGuard lock(display_);
 
-        auto screen = lv_screen_active();
-        if (!screen) return;
+        // Use lv_layer_top() so the environmental UI sits reliably on top of
+        // the Xiaozhi active screen without being obscured by container_
+        auto parent_layer = lv_layer_top();
+        if (!parent_layer) {
+            parent_layer = lv_screen_active();
+        }
+        if (!parent_layer) return;
+
+        ESP_LOGI(TAG_ENV_UI, "Creating Environmental UI overlay on lv_layer_top");
 
         // Overlay container covers the full 128x160 screen with dark background
-        overlay_container_ = lv_obj_create(screen);
+        overlay_container_ = lv_obj_create(parent_layer);
         lv_obj_set_size(overlay_container_, 128, 160);
         lv_obj_align(overlay_container_, LV_ALIGN_TOP_LEFT, 0, 0);
         lv_obj_set_style_bg_color(overlay_container_, lv_color_hex(0x121212), 0);
@@ -240,7 +251,9 @@ private:
             return;
         }
 
+        // Unhide overlay container and bring to foreground on top layer
         lv_obj_remove_flag(overlay_container_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(overlay_container_);
 
         // Hide all 3 sub-views first
         lv_obj_add_flag(temp_view_, LV_OBJ_FLAG_HIDDEN);
@@ -263,14 +276,14 @@ public:
     }
 
     void Start() {
-        CreateViews();
-
         // Start background sensor sampling & UI refresh task (runs every 2 seconds)
         xTaskCreate([](void* arg) {
             auto self = static_cast<EnvDisplayManager*>(arg);
+            // Wait 1 second after boot so display SetupUI() completes first
+            vTaskDelay(pdMS_TO_TICKS(1000));
             while (true) {
-                vTaskDelay(pdMS_TO_TICKS(2000));
                 self->UpdateData();
+                vTaskDelay(pdMS_TO_TICKS(2000));
             }
         }, "env_ui_task", 4096, this, 3, &update_task_handle_);
     }
@@ -282,6 +295,7 @@ public:
         dht_->Read(t, h);
 
         DisplayLockGuard lock(display_);
+        EnsureViews();
         if (!overlay_container_) return;
 
         char buf[32];
@@ -324,6 +338,7 @@ public:
     void SetMode(DisplayMode mode) {
         if (!display_) return;
         DisplayLockGuard lock(display_);
+        EnsureViews();
         current_mode_ = mode;
         ApplyModeVisibility(current_mode_);
         ESP_LOGI(TAG_ENV_UI, "Display switched to Mode %d", (int)current_mode_);
@@ -335,6 +350,7 @@ public:
 
     // Button 1: Chuyen vong tron giua Mode 1, Mode 2, Mode 3
     void CycleMode123() {
+        ESP_LOGI(TAG_ENV_UI, "CycleMode123 called, current_mode=%d", (int)current_mode_);
         if (current_mode_ == kModeXiaozhi) {
             SetMode(kModeTempChart);
         } else if (current_mode_ == kModeTempChart) {
@@ -346,6 +362,7 @@ public:
 
     // Button 2: Chuyen sang Mode 4 (Hoac toggle ve Mode 1 neu dang o Mode 4)
     void SwitchToMode4() {
+        ESP_LOGI(TAG_ENV_UI, "SwitchToMode4 called, current_mode=%d", (int)current_mode_);
         if (current_mode_ != kModeDual) {
             SetMode(kModeDual);
         } else {

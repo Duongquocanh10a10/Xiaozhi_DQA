@@ -183,8 +183,14 @@ private:
         });
 
         // Nut 1 (GPIO 17): Chuyen vong tron qua cac mode 1 -> 2 -> 3 -> 1
-        // Mode 1: AI Xiaozhi, Mode 2: Nhiet do + Do thi, Mode 3: Do am + Do thi
-        mode_button_1_.OnClick([this]() {
+        // Phan hoi tuc thi ngay khi an xuong (OnPressDown)
+        mode_button_1_.OnPressDown([this]() {
+            static uint32_t last_press = 0;
+            uint32_t now = esp_log_timestamp();
+            if (now - last_press < 250) return;
+            last_press = now;
+
+            ESP_LOGI(TAG, "Mode Button 1 Pressed (GPIO 17) -> Cycle Mode");
             power_save_timer_->WakeUp();
             if (env_display_) {
                 env_display_->CycleMode123();
@@ -192,7 +198,14 @@ private:
         });
 
         // Nut 2 (GPIO 21): Chuyen truc tiep sang Mode 4 (Xem song song ca Nhiet do & Do am)
-        mode_button_2_.OnClick([this]() {
+        // Phan hoi tuc thi ngay khi an xuong (OnPressDown)
+        mode_button_2_.OnPressDown([this]() {
+            static uint32_t last_press = 0;
+            uint32_t now = esp_log_timestamp();
+            if (now - last_press < 250) return;
+            last_press = now;
+
+            ESP_LOGI(TAG, "Mode Button 2 Pressed (GPIO 21) -> Switch Mode 4");
             power_save_timer_->WakeUp();
             if (env_display_) {
                 env_display_->SwitchToMode4();
