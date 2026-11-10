@@ -10,6 +10,7 @@
 #include <string>
 
 #define TAG_ENV_UI "EnvDisplayManager"
+#define HIST_SAMPLES 12
 
 enum DisplayMode {
     kModeXiaozhi = 1,
@@ -30,14 +31,14 @@ private:
     // View 2: Temperature Chart
     lv_obj_t* temp_view_ = nullptr;
     lv_obj_t* temp_val_label_ = nullptr;
-    lv_obj_t* temp_chart_ = nullptr;
-    lv_chart_series_t* temp_series_ = nullptr;
+    lv_obj_t* temp_bars_[HIST_SAMPLES] = {nullptr};
+    int temp_history_[HIST_SAMPLES] = {0};
 
     // View 3: Humidity Chart
     lv_obj_t* humi_view_ = nullptr;
     lv_obj_t* humi_val_label_ = nullptr;
-    lv_obj_t* humi_chart_ = nullptr;
-    lv_chart_series_t* humi_series_ = nullptr;
+    lv_obj_t* humi_bars_[HIST_SAMPLES] = {nullptr};
+    int humi_history_[HIST_SAMPLES] = {0};
 
     // View 4: Dual Display
     lv_obj_t* dual_view_ = nullptr;
@@ -74,7 +75,7 @@ private:
         lv_obj_set_style_bg_color(temp_view_, lv_color_hex(0x1A1A1A), 0);
         lv_obj_set_style_border_color(temp_view_, lv_color_hex(0xFF5722), 0);
         lv_obj_set_style_border_width(temp_view_, 1, 0);
-        lv_obj_set_style_pad_all(temp_view_, 3, 0);
+        lv_obj_set_style_pad_all(temp_view_, 2, 0);
 
         lv_obj_t* temp_title = lv_label_create(temp_view_);
         lv_label_set_text(temp_title, "NHIET DO");
@@ -82,20 +83,35 @@ private:
         lv_obj_align(temp_title, LV_ALIGN_TOP_MID, 0, 2);
 
         temp_val_label_ = lv_label_create(temp_view_);
-        lv_label_set_text(temp_val_label_, "--.- °C");
+        lv_label_set_text(temp_val_label_, "--.- \xc2\xb0\x43");
         lv_obj_set_style_text_color(temp_val_label_, lv_color_hex(0xFF5722), 0);
-        lv_obj_align(temp_val_label_, LV_ALIGN_TOP_MID, 0, 20);
+        lv_obj_align(temp_val_label_, LV_ALIGN_TOP_MID, 0, 18);
 
-        temp_chart_ = lv_chart_create(temp_view_);
-        lv_obj_set_size(temp_chart_, 114, 96);
-        lv_obj_align(temp_chart_, LV_ALIGN_BOTTOM_MID, 0, -2);
-        lv_chart_set_type(temp_chart_, LV_CHART_TYPE_LINE);
-        lv_chart_set_point_count(temp_chart_, 16);
-        lv_chart_set_range(temp_chart_, LV_CHART_AXIS_PRIMARY_Y, 15, 45);
-        lv_obj_set_style_bg_color(temp_chart_, lv_color_hex(0x262626), 0);
-        lv_obj_set_style_border_width(temp_chart_, 0, 0);
-        lv_obj_set_style_pad_all(temp_chart_, 2, 0);
-        temp_series_ = lv_chart_add_series(temp_chart_, lv_color_hex(0xFF5722), LV_CHART_AXIS_PRIMARY_Y);
+        // Chart container (for 12 history bars)
+        lv_obj_t* temp_chart_box = lv_obj_create(temp_view_);
+        lv_obj_set_size(temp_chart_box, 116, 92);
+        lv_obj_align(temp_chart_box, LV_ALIGN_BOTTOM_MID, 0, -2);
+        lv_obj_set_style_bg_color(temp_chart_box, lv_color_hex(0x222222), 0);
+        lv_obj_set_style_border_color(temp_chart_box, lv_color_hex(0x333333), 0);
+        lv_obj_set_style_border_width(temp_chart_box, 1, 0);
+        lv_obj_set_style_pad_all(temp_chart_box, 2, 0);
+
+        for (int i = 0; i < HIST_SAMPLES; i++) {
+            temp_bars_[i] = lv_bar_create(temp_chart_box);
+            lv_obj_set_size(temp_bars_[i], 6, 68);
+            lv_obj_align(temp_bars_[i], LV_ALIGN_TOP_LEFT, 2 + i * 9, 2);
+            lv_bar_set_range(temp_bars_[i], 10, 50);
+            lv_bar_set_value(temp_bars_[i], 25, LV_ANIM_OFF);
+            lv_obj_set_style_bg_color(temp_bars_[i], lv_color_hex(0xFF5722), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(temp_bars_[i], lv_color_hex(0x2E2E2E), LV_PART_MAIN);
+            lv_obj_set_style_radius(temp_bars_[i], 2, 0);
+            temp_history_[i] = 25;
+        }
+
+        lv_obj_t* temp_chart_info = lv_label_create(temp_chart_box);
+        lv_label_set_text(temp_chart_info, "10C       2s/m       50C");
+        lv_obj_set_style_text_color(temp_chart_info, lv_color_hex(0x757575), 0);
+        lv_obj_align(temp_chart_info, LV_ALIGN_BOTTOM_MID, 0, 0);
 
         // ==========================================
         // VIEW 3: HUMIDITY & CHART
@@ -106,7 +122,7 @@ private:
         lv_obj_set_style_bg_color(humi_view_, lv_color_hex(0x1A1A1A), 0);
         lv_obj_set_style_border_color(humi_view_, lv_color_hex(0x2196F3), 0);
         lv_obj_set_style_border_width(humi_view_, 1, 0);
-        lv_obj_set_style_pad_all(humi_view_, 3, 0);
+        lv_obj_set_style_pad_all(humi_view_, 2, 0);
 
         lv_obj_t* humi_title = lv_label_create(humi_view_);
         lv_label_set_text(humi_title, "DO AM KHI");
@@ -116,18 +132,33 @@ private:
         humi_val_label_ = lv_label_create(humi_view_);
         lv_label_set_text(humi_val_label_, "--.- %");
         lv_obj_set_style_text_color(humi_val_label_, lv_color_hex(0x2196F3), 0);
-        lv_obj_align(humi_val_label_, LV_ALIGN_TOP_MID, 0, 20);
+        lv_obj_align(humi_val_label_, LV_ALIGN_TOP_MID, 0, 18);
 
-        humi_chart_ = lv_chart_create(humi_view_);
-        lv_obj_set_size(humi_chart_, 114, 96);
-        lv_obj_align(humi_chart_, LV_ALIGN_BOTTOM_MID, 0, -2);
-        lv_chart_set_type(humi_chart_, LV_CHART_TYPE_LINE);
-        lv_chart_set_point_count(humi_chart_, 16);
-        lv_chart_set_range(humi_chart_, LV_CHART_AXIS_PRIMARY_Y, 20, 100);
-        lv_obj_set_style_bg_color(humi_chart_, lv_color_hex(0x262626), 0);
-        lv_obj_set_style_border_width(humi_chart_, 0, 0);
-        lv_obj_set_style_pad_all(humi_chart_, 2, 0);
-        humi_series_ = lv_chart_add_series(humi_chart_, lv_color_hex(0x2196F3), LV_CHART_AXIS_PRIMARY_Y);
+        // Chart container (for 12 history bars)
+        lv_obj_t* humi_chart_box = lv_obj_create(humi_view_);
+        lv_obj_set_size(humi_chart_box, 116, 92);
+        lv_obj_align(humi_chart_box, LV_ALIGN_BOTTOM_MID, 0, -2);
+        lv_obj_set_style_bg_color(humi_chart_box, lv_color_hex(0x222222), 0);
+        lv_obj_set_style_border_color(humi_chart_box, lv_color_hex(0x333333), 0);
+        lv_obj_set_style_border_width(humi_chart_box, 1, 0);
+        lv_obj_set_style_pad_all(humi_chart_box, 2, 0);
+
+        for (int i = 0; i < HIST_SAMPLES; i++) {
+            humi_bars_[i] = lv_bar_create(humi_chart_box);
+            lv_obj_set_size(humi_bars_[i], 6, 68);
+            lv_obj_align(humi_bars_[i], LV_ALIGN_TOP_LEFT, 2 + i * 9, 2);
+            lv_bar_set_range(humi_bars_[i], 10, 100);
+            lv_bar_set_value(humi_bars_[i], 60, LV_ANIM_OFF);
+            lv_obj_set_style_bg_color(humi_bars_[i], lv_color_hex(0x2196F3), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(humi_bars_[i], lv_color_hex(0x2E2E2E), LV_PART_MAIN);
+            lv_obj_set_style_radius(humi_bars_[i], 2, 0);
+            humi_history_[i] = 60;
+        }
+
+        lv_obj_t* humi_chart_info = lv_label_create(humi_chart_box);
+        lv_label_set_text(humi_chart_info, "10%       2s/m      100%");
+        lv_obj_set_style_text_color(humi_chart_info, lv_color_hex(0x757575), 0);
+        lv_obj_align(humi_chart_info, LV_ALIGN_BOTTOM_MID, 0, 0);
 
         // ==========================================
         // VIEW 4: DUAL SENSOR DASHBOARD
@@ -160,7 +191,7 @@ private:
         lv_obj_align(lbl_t, LV_ALIGN_TOP_LEFT, 4, 2);
 
         dual_temp_label_ = lv_label_create(card_temp);
-        lv_label_set_text(dual_temp_label_, "--.- °C");
+        lv_label_set_text(dual_temp_label_, "--.- \xc2\xb0\x43");
         lv_obj_set_style_text_color(dual_temp_label_, lv_color_hex(0xFF5722), 0);
         lv_obj_align(dual_temp_label_, LV_ALIGN_BOTTOM_RIGHT, -4, -4);
 
@@ -256,13 +287,20 @@ public:
         char buf[32];
 
         // 1. Update Temperature elements
-        snprintf(buf, sizeof(buf), "%.1f °C", t);
+        snprintf(buf, sizeof(buf), "%.1f \xc2\xb0\x43", t);
         if (temp_val_label_) lv_label_set_text(temp_val_label_, buf);
         if (dual_temp_label_) lv_label_set_text(dual_temp_label_, buf);
         if (dual_temp_bar_) lv_bar_set_value(dual_temp_bar_, (int)t, LV_ANIM_OFF);
-        if (temp_chart_ && temp_series_) {
-            lv_chart_set_next_value(temp_chart_, temp_series_, (int)t);
-            lv_chart_refresh(temp_chart_);
+        
+        // Shift history and update 12 temperature bars
+        for (int i = 0; i < HIST_SAMPLES - 1; i++) {
+            temp_history_[i] = temp_history_[i + 1];
+        }
+        temp_history_[HIST_SAMPLES - 1] = (int)t;
+        for (int i = 0; i < HIST_SAMPLES; i++) {
+            if (temp_bars_[i]) {
+                lv_bar_set_value(temp_bars_[i], temp_history_[i], LV_ANIM_OFF);
+            }
         }
 
         // 2. Update Humidity elements
@@ -270,9 +308,16 @@ public:
         if (humi_val_label_) lv_label_set_text(humi_val_label_, buf);
         if (dual_humi_label_) lv_label_set_text(dual_humi_label_, buf);
         if (dual_humi_bar_) lv_bar_set_value(dual_humi_bar_, (int)h, LV_ANIM_OFF);
-        if (humi_chart_ && humi_series_) {
-            lv_chart_set_next_value(humi_chart_, humi_series_, (int)h);
-            lv_chart_refresh(humi_chart_);
+
+        // Shift history and update 12 humidity bars
+        for (int i = 0; i < HIST_SAMPLES - 1; i++) {
+            humi_history_[i] = humi_history_[i + 1];
+        }
+        humi_history_[HIST_SAMPLES - 1] = (int)h;
+        for (int i = 0; i < HIST_SAMPLES; i++) {
+            if (humi_bars_[i]) {
+                lv_bar_set_value(humi_bars_[i], humi_history_[i], LV_ANIM_OFF);
+            }
         }
     }
 
