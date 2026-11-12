@@ -295,14 +295,11 @@ private:
             "  `query`: Ten bai hat hoac tu khoa tim kiem (VD: 'See Tinh', 'Waiting For You', 'Son Tung M-TP')\n"
             "  `platform`: Nen tang phat ('spotify', 'youtube', 'mp3'). Mac dinh la 'spotify'.",
             PropertyList({
-                Property("query", kPropertyTypeString, true),
-                Property("platform", kPropertyTypeString, false)
+                Property("query", kPropertyTypeString),
+                Property("platform", kPropertyTypeString, std::string("spotify"))
             }), [this](const PropertyList& properties) -> ReturnValue {
                 std::string query = properties["query"].value<std::string>();
-                std::string platform = "spotify";
-                if (properties.find("platform") != properties.end()) {
-                    platform = properties["platform"].value<std::string>();
-                }
+                std::string platform = properties["platform"].value<std::string>();
 
                 // Chuan hoa ten nen tang
                 std::string norm_platform = "Spotify";
@@ -345,7 +342,7 @@ private:
         mcp_server.AddTool("self.music.control",
             "Dieu khien trinh phat nhac. Cac hanh dong: 'play' (tiep tuc), 'pause' (tam dung), 'stop' (dung phat), 'next' (bai tiep), 'prev' (bai truoc).",
             PropertyList({
-                Property("action", kPropertyTypeString, true)
+                Property("action", kPropertyTypeString)
             }), [this](const PropertyList& properties) -> ReturnValue {
                 std::string action = properties["action"].value<std::string>();
                 std::transform(action.begin(), action.end(), action.begin(), ::tolower);
@@ -391,21 +388,15 @@ private:
         mcp_server.AddTool("self.music.set_track",
             "Thiet lap thong tin bai hat hien thi len man hinh LCD.",
             PropertyList({
-                Property("title", kPropertyTypeString, true),
-                Property("artist", kPropertyTypeString, true),
-                Property("platform", kPropertyTypeString, false),
-                Property("duration_sec", kPropertyTypeInteger, false)
+                Property("title", kPropertyTypeString),
+                Property("artist", kPropertyTypeString),
+                Property("platform", kPropertyTypeString, std::string("Spotify")),
+                Property("duration_sec", kPropertyTypeInteger, 210)
             }), [this](const PropertyList& properties) -> ReturnValue {
                 std::string title = properties["title"].value<std::string>();
                 std::string artist = properties["artist"].value<std::string>();
-                std::string platform = "Spotify";
-                if (properties.find("platform") != properties.end()) {
-                    platform = properties["platform"].value<std::string>();
-                }
-                int duration = 210;
-                if (properties.find("duration_sec") != properties.end()) {
-                    duration = properties["duration_sec"].value<int>();
-                }
+                std::string platform = properties["platform"].value<std::string>();
+                int duration = properties["duration_sec"].value<int>();
                 if (env_display_) {
                     env_display_->SetMusicTrack(title, artist, platform, duration);
                     return true;
