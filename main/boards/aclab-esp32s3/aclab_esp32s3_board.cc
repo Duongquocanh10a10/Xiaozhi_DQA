@@ -346,9 +346,9 @@ private:
         // MCP Tool 5: Tim kiem va phat nhac tren YouTube Music (Duy nhat nguon YouTube Music)
         auto yt_play_handler = [this](const PropertyList& properties) -> ReturnValue {
             std::string query = properties["query"].value<std::string>();
-            std::string artist = properties.Has("artist") ? properties["artist"].value<std::string>() : "";
-            int duration = properties.Has("duration_sec") ? properties["duration_sec"].value<int>() : 0;
-            std::string audio_url = properties.Has("audio_url") ? properties["audio_url"].value<std::string>() : "";
+            std::string artist = properties["artist"].value<std::string>();
+            int duration = properties["duration_sec"].value<int>();
+            std::string audio_url = properties["audio_url"].value<std::string>();
 
             std::string title = query;
             if (artist.empty()) {
