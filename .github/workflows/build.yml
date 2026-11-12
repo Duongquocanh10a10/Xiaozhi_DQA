@@ -91,6 +91,7 @@ jobs:
           VARIANT: ${{ matrix.name }}
           BUILD_OPTIONS_JSON: ${{ toJSON(matrix.ci_build_options) }}
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           source "$IDF_PATH/export.sh"
           OPTIONS=()
           if [[ "$BUILD_OPTIONS_JSON" != "null" && -n "$BUILD_OPTIONS_JSON" ]]; then

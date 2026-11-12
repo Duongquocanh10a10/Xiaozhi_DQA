@@ -170,15 +170,16 @@ private:
     lv_obj_t* music_progress_bar_ = nullptr;
     lv_obj_t* music_eq_bars_[8] = {nullptr};
 
-    // Music playback state
+    // Music playback state (Chuyen biet 100% cho YouTube Music)
     std::string music_title_ = "Chua phat nhac";
-    std::string music_artist_ = "XiaoZhi Music";
-    std::string music_platform_ = "Spotify"; // "Spotify", "YouTube Music", "MP3 Online"
+    std::string music_artist_ = "YouTube Music";
+    std::string music_platform_ = "YouTube Music";
     bool music_is_playing_ = false;
     int music_cur_sec_ = 0;
-    int music_total_sec_ = 210;
+    int music_total_sec_ = 0;
 
     TaskHandle_t update_task_handle_ = nullptr;
+    std::function<void()> on_playback_completed_ = nullptr;
 
     void EnsureViews() {
         if (overlay_container_ != nullptr) return;
@@ -371,27 +372,27 @@ private:
         lv_obj_set_style_bg_color(dual_humi_bar_, lv_color_hex(0x2196F3), LV_PART_INDICATOR);
 
         // ==========================================
-        // VIEW 5: MUSIC PLAYER (Spotify / YT Music / MP3)
+        // VIEW 5: YOUTUBE MUSIC PLAYER
         // ==========================================
         music_view_ = lv_obj_create(overlay_container_);
         lv_obj_set_size(music_view_, 124, 156);
         lv_obj_align(music_view_, LV_ALIGN_CENTER, 0, 0);
-        lv_obj_set_style_bg_color(music_view_, lv_color_hex(0x121212), 0);
-        lv_obj_set_style_border_color(music_view_, lv_color_hex(0x1DB954), 0);
+        lv_obj_set_style_bg_color(music_view_, lv_color_hex(0x0F0F0F), 0);
+        lv_obj_set_style_border_color(music_view_, lv_color_hex(0xFF0000), 0);
         lv_obj_set_style_border_width(music_view_, 1, 0);
         lv_obj_set_style_pad_all(music_view_, 2, 0);
 
         // Platform badge
         music_badge_ = lv_label_create(music_view_);
-        lv_label_set_text(music_badge_, "[ SPOTIFY ]");
-        lv_obj_set_style_text_color(music_badge_, lv_color_hex(0x1DB954), 0);
+        lv_label_set_text(music_badge_, "[ YT MUSIC ]");
+        lv_obj_set_style_text_color(music_badge_, lv_color_hex(0xFF0000), 0);
         lv_obj_align(music_badge_, LV_ALIGN_TOP_MID, 0, 2);
 
         // Equalizer container (8 bars)
         lv_obj_t* music_eq_box = lv_obj_create(music_view_);
         lv_obj_set_size(music_eq_box, 96, 32);
         lv_obj_align(music_eq_box, LV_ALIGN_TOP_MID, 0, 20);
-        lv_obj_set_style_bg_color(music_eq_box, lv_color_hex(0x1E1E1E), 0);
+        lv_obj_set_style_bg_color(music_eq_box, lv_color_hex(0x1A1A1A), 0);
         lv_obj_set_style_border_width(music_eq_box, 0, 0);
         lv_obj_set_style_pad_all(music_eq_box, 2, 0);
         lv_obj_set_style_radius(music_eq_box, 4, 0);
@@ -401,9 +402,9 @@ private:
             lv_obj_set_size(music_eq_bars_[i], 6, 26);
             lv_obj_align(music_eq_bars_[i], LV_ALIGN_TOP_LEFT, 6 + i * 10, 1);
             lv_bar_set_range(music_eq_bars_[i], 0, 100);
-            lv_bar_set_value(music_eq_bars_[i], 15 + i * 8, LV_ANIM_OFF);
-            lv_obj_set_style_bg_color(music_eq_bars_[i], lv_color_hex(0x1DB954), LV_PART_INDICATOR);
-            lv_obj_set_style_bg_color(music_eq_bars_[i], lv_color_hex(0x2C2C2C), LV_PART_MAIN);
+            lv_bar_set_value(music_eq_bars_[i], 0, LV_ANIM_OFF);
+            lv_obj_set_style_bg_color(music_eq_bars_[i], lv_color_hex(0xFF0000), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(music_eq_bars_[i], lv_color_hex(0x282828), LV_PART_MAIN);
             lv_obj_set_style_radius(music_eq_bars_[i], 1, 0);
         }
 
@@ -418,11 +419,11 @@ private:
 
         // Artist name (cuon chu tu dong neu ten dai)
         music_artist_label_ = lv_label_create(music_view_);
-        lv_label_set_text(music_artist_label_, "XiaoZhi Music");
+        lv_label_set_text(music_artist_label_, "YouTube Music");
         lv_label_set_long_mode(music_artist_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
         lv_obj_set_width(music_artist_label_, 116);
         lv_obj_set_style_text_align(music_artist_label_, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_style_text_color(music_artist_label_, lv_color_hex(0x90A4AE), 0);
+        lv_obj_set_style_text_color(music_artist_label_, lv_color_hex(0xAAAAAA), 0);
         lv_obj_align(music_artist_label_, LV_ALIGN_TOP_MID, 0, 74);
 
         // Progress bar
@@ -431,13 +432,13 @@ private:
         lv_obj_align(music_progress_bar_, LV_ALIGN_TOP_MID, 0, 95);
         lv_bar_set_range(music_progress_bar_, 0, 100);
         lv_bar_set_value(music_progress_bar_, 0, LV_ANIM_OFF);
-        lv_obj_set_style_bg_color(music_progress_bar_, lv_color_hex(0x1DB954), LV_PART_INDICATOR);
-        lv_obj_set_style_bg_color(music_progress_bar_, lv_color_hex(0x2A2A2A), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(music_progress_bar_, lv_color_hex(0xFF0000), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(music_progress_bar_, lv_color_hex(0x282828), LV_PART_MAIN);
 
         // Time label
         music_time_label_ = lv_label_create(music_view_);
-        lv_label_set_text(music_time_label_, "00:00 / 03:30");
-        lv_obj_set_style_text_color(music_time_label_, lv_color_hex(0x78909C), 0);
+        lv_label_set_text(music_time_label_, "00:00 / 00:00");
+        lv_obj_set_style_text_color(music_time_label_, lv_color_hex(0x9E9E9E), 0);
         lv_obj_align(music_time_label_, LV_ALIGN_TOP_MID, 0, 103);
 
         // Status / control label
@@ -513,18 +514,8 @@ private:
     void UpdateMusicUi() {
         if (!music_view_) return;
 
-        lv_color_t color;
-        const char* badge_text = "[ SPOTIFY ]";
-        if (music_platform_.find("You") != std::string::npos || music_platform_.find("yt") != std::string::npos || music_platform_.find("YT") != std::string::npos) {
-            color = lv_color_hex(0xFF3333); // Red
-            badge_text = "[ YT MUSIC ]";
-        } else if (music_platform_.find("MP3") != std::string::npos || music_platform_.find("mp3") != std::string::npos || music_platform_.find("Zing") != std::string::npos) {
-            color = lv_color_hex(0x00E5FF); // Cyan
-            badge_text = "[ MP3 ONLINE ]";
-        } else {
-            color = lv_color_hex(0x1DB954); // Spotify Green
-            badge_text = "[ SPOTIFY ]";
-        }
+        lv_color_t color = lv_color_hex(0xFF0000); // Dedicated YouTube Red
+        const char* badge_text = "[ YT MUSIC ]";
 
         lv_obj_set_style_border_color(music_view_, color, 0);
         if (music_badge_) {
@@ -561,6 +552,9 @@ private:
             if (music_is_playing_) {
                 lv_label_set_text(music_status_label_, "[ > DANG PHAT ]");
                 lv_obj_set_style_text_color(music_status_label_, lv_color_hex(0x00E676), 0);
+            } else if (music_cur_sec_ >= music_total_sec_ && music_total_sec_ > 0) {
+                lv_label_set_text(music_status_label_, "[ HOAN TAT ]");
+                lv_obj_set_style_text_color(music_status_label_, lv_color_hex(0x29B6F6), 0);
             } else {
                 lv_label_set_text(music_status_label_, "[ || TAM DUNG ]");
                 lv_obj_set_style_text_color(music_status_label_, lv_color_hex(0xFFA726), 0);
@@ -649,12 +643,15 @@ public:
 
         if (music_is_playing_) {
             music_cur_sec_++;
-            if (music_cur_sec_ >= music_total_sec_) {
+            if (music_total_sec_ > 0 && music_cur_sec_ >= music_total_sec_) {
                 music_cur_sec_ = music_total_sec_;
                 music_is_playing_ = false;
                 if (music_status_label_) {
                     lv_label_set_text(music_status_label_, "[ HOAN TAT ]");
                     lv_obj_set_style_text_color(music_status_label_, lv_color_hex(0x29B6F6), 0);
+                }
+                if (on_playback_completed_) {
+                    on_playback_completed_();
                 }
             }
             if (music_progress_bar_) {
@@ -716,11 +713,11 @@ public:
         }
     }
 
-    // Music control methods
-    void SetMusicTrack(const std::string& title, const std::string& artist, const std::string& platform, int duration_sec = 210) {
+    // Music control methods (Chuyen biet YouTube Music)
+    void SetMusicTrack(const std::string& title, const std::string& artist = "YouTube Music", const std::string& platform = "YouTube Music", int duration_sec = 0) {
         music_title_ = SanitizeVietnameseForDisplay(title);
-        music_artist_ = SanitizeVietnameseForDisplay(artist);
-        music_platform_ = platform;
+        music_artist_ = SanitizeVietnameseForDisplay(artist.empty() ? "YouTube Music" : artist);
+        music_platform_ = "YouTube Music";
         music_cur_sec_ = 0;
         music_total_sec_ = duration_sec > 0 ? duration_sec : 210;
         music_is_playing_ = true;
@@ -751,6 +748,21 @@ public:
         DisplayLockGuard lock(display_);
         EnsureViews();
         UpdateMusicUi();
+    }
+
+    void OnPlaybackFinished() {
+        music_is_playing_ = false;
+        if (music_total_sec_ > 0) {
+            music_cur_sec_ = music_total_sec_;
+        }
+        if (!display_) return;
+        DisplayLockGuard lock(display_);
+        EnsureViews();
+        UpdateMusicUi();
+    }
+
+    void SetPlaybackCompletedCallback(std::function<void()> cb) {
+        on_playback_completed_ = cb;
     }
 
     std::string GetMusicTitle() const { return music_title_; }

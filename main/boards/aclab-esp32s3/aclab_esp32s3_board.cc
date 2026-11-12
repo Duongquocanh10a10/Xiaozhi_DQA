@@ -10,6 +10,7 @@
 #include "servo_controller.h"
 #include "dht11.h"
 #include "env_display_manager.h"
+#include "youtube_music_config.h"
 #include "led/single_led.h"
 #include "power_save_timer.h"
 #include "settings.h"
@@ -235,21 +236,20 @@ private:
         power_save_timer_->SetEnabled(true);
     }
 
-    void PlayMusicAfterSpeaking(const std::string& audio_url, const std::string& title, const std::string& artist, const std::string& platform, int duration_sec) {
+    void PlayMusicAfterSpeaking(const std::string& audio_url, const std::string& title, const std::string& artist, int duration_sec) {
         struct PlaybackJob {
             AclabEsp32S3Board* board;
             std::string audio_url;
             std::string title;
             std::string artist;
-            std::string platform;
             int duration_sec;
         };
 
-        auto job = new PlaybackJob{this, audio_url, title, artist, platform, duration_sec};
+        auto job = new PlaybackJob{this, audio_url, title, artist, duration_sec};
 
         xTaskCreate([](void* arg) {
             auto j = static_cast<PlaybackJob*>(arg);
-            ESP_LOGI(TAG, "PlaybackJob: Waiting for AI speech to finish before starting music...");
+            ESP_LOGI(TAG, "PlaybackJob: Waiting for AI speech to finish before starting YouTube Music...");
 
             auto& app = Application::GetInstance();
             // Cho thoi gian 400ms de neu AI chuan bi phat TTS thi state kip chuyen sang Speaking
@@ -261,7 +261,7 @@ private:
                 DeviceState state = app.GetDeviceState();
                 bool audio_idle = app.GetAudioService().IsPlaybackIdle();
                 if (state != kDeviceStateSpeaking && audio_idle) {
-                    ESP_LOGI(TAG, "PlaybackJob: AI speech done (state=%d), starting music now!", (int)state);
+                    ESP_LOGI(TAG, "PlaybackJob: AI speech done (state=%d), starting YouTube Music now!", (int)state);
                     break;
                 }
                 vTaskDelay(pdMS_TO_TICKS(100));
@@ -270,14 +270,14 @@ private:
 
             vTaskDelay(pdMS_TO_TICKS(200));
 
-            // Cap nhat giao dien Mode 5 voi thong tin bai hat va thoi luong chuan
+            // Cap nhat giao dien Mode 5 voi thong tin bai hat va thoi luong chuan tu YouTube Music
             if (j->board->env_display_) {
-                j->board->env_display_->SetMusicTrack(j->title, j->artist, j->platform, j->duration_sec);
+                j->board->env_display_->SetMusicTrack(j->title, j->artist, "YouTube Music", j->duration_sec);
             }
 
             // Phat luong audio stream neu co link
             if (!j->audio_url.empty()) {
-                ESP_LOGI(TAG, "PlaybackJob: Starting direct audio stream: %s", j->audio_url.c_str());
+                ESP_LOGI(TAG, "PlaybackJob: Starting direct YouTube Music stream: %s", j->audio_url.c_str());
                 app.Schedule([url = j->audio_url]() {
                     Application::GetInstance().StartNotification(url, {});
                 });
@@ -287,7 +287,7 @@ private:
 
             delete j;
             vTaskDelete(NULL);
-        }, "music_delay_task", 4096, job, 2, NULL);
+        }, "yt_music_task", 4096, job, 2, NULL);
     }
 
     void InitializeTools() {
@@ -343,38 +343,15 @@ private:
                 return false;
             });
 
-        // MCP Tool 5: Tim kiem va phat nhac tren Spotify, YouTube Music, MP3
-        mcp_server.AddTool("self.music.search_and_play",
-            "Tim kiem va phat bai hat tren Spotify, YouTube Music hoac MP3. Thiet bi se tu dong cho AI noi xong cau phan hoi roi moi bat dau phat nhac de tranh xung dot am thanh.\n"
-            "Tham so:\n"
-            "  `query`: Ten bai hat hoac tu khoa tim kiem (VD: 'See Tinh', 'Waiting For You', 'Son Tung M-TP')\n"
-            "  `platform`: Nen tang phat ('spotify', 'youtube', 'mp3'). Mac dinh la 'spotify'.\n"
-            "  `duration_sec`: (Tuy chon) Thoi luong bai hat tinh bang giay (VD: 245 cho 4 phut 5 giay). Neu khong truyen se tu dong uoc tinh.\n"
-            "  `audio_url`: (Tuy chon) URL luong am thanh truc tiep (OGG Opus / stream) de loa phat ngay.",
-            PropertyList({
-                Property("query", kPropertyTypeString),
-                Property("platform", kPropertyTypeString, std::string("spotify")),
-                Property("duration_sec", kPropertyTypeInteger, 0),
-                Property("audio_url", kPropertyTypeString, std::string(""))
-            }), [this](const PropertyList& properties) -> ReturnValue {
-                std::string query = properties["query"].value<std::string>();
-                std::string platform = properties["platform"].value<std::string>();
-                int duration = properties["duration_sec"].value<int>();
-                std::string audio_url = properties["audio_url"].value<std::string>();
+        // MCP Tool 5: Tim kiem va phat nhac tren YouTube Music (Duy nhat nguon YouTube Music)
+        auto yt_play_handler = [this](const PropertyList& properties) -> ReturnValue {
+            std::string query = properties["query"].value<std::string>();
+            std::string artist = properties.Has("artist") ? properties["artist"].value<std::string>() : "";
+            int duration = properties.Has("duration_sec") ? properties["duration_sec"].value<int>() : 0;
+            std::string audio_url = properties.Has("audio_url") ? properties["audio_url"].value<std::string>() : "";
 
-                // Chuan hoa ten nen tang
-                std::string norm_platform = "Spotify";
-                std::string p_lower = platform;
-                std::transform(p_lower.begin(), p_lower.end(), p_lower.begin(), ::tolower);
-                if (p_lower.find("you") != std::string::npos || p_lower.find("yt") != std::string::npos) {
-                    norm_platform = "YouTube Music";
-                } else if (p_lower.find("mp3") != std::string::npos || p_lower.find("zing") != std::string::npos) {
-                    norm_platform = "MP3 Online";
-                }
-
-                // Tach nghe si va ten bai hat tu query (neu co)
-                std::string title = query;
-                std::string artist = norm_platform + " Top Hits";
+            std::string title = query;
+            if (artist.empty()) {
                 size_t dash = query.find(" - ");
                 if (dash != std::string::npos) {
                     title = query.substr(0, dash);
@@ -384,30 +361,57 @@ private:
                     if (cua != std::string::npos) {
                         title = query.substr(0, cua);
                         artist = query.substr(cua + 5);
+                    } else {
+                        artist = "YouTube Music";
                     }
                 }
+            }
 
-                if (duration <= 0) {
-                    duration = 215; // Mac dinh 3 phut 35 giay
-                }
+            if (duration <= 0) {
+                duration = 215; // Mac dinh uoc tinh neu khong truyen
+            }
 
-                // Cho AI noi xong roi moi kich hoat giao dien Mode 5 va phat nhac
-                PlayMusicAfterSpeaking(audio_url, title, artist, norm_platform, duration);
+            // Cho AI noi xong roi moi kich hoat giao dien Mode 5 va phat nhac
+            PlayMusicAfterSpeaking(audio_url, title, artist, duration);
 
-                char ret_buf[512];
-                snprintf(ret_buf, sizeof(ret_buf),
-                    "{\"status\":\"scheduled\",\"platform\":\"%s\",\"title\":\"%s\",\"artist\":\"%s\",\"duration_sec\":%d,"
-                    "\"direct_stream\":%s,"
-                    "\"message\":\"Da len lich phat bai %s tren %s. Thiet bi se tu dong phat ngay sau khi ban noi xong.\"}",
-                    norm_platform.c_str(), title.c_str(), artist.c_str(), duration,
-                    audio_url.empty() ? "false" : "true",
-                    title.c_str(), norm_platform.c_str());
-                return std::string(ret_buf);
-            });
+            char ret_buf[512];
+            snprintf(ret_buf, sizeof(ret_buf),
+                "{\"status\":\"scheduled\",\"platform\":\"YouTube Music\",\"title\":\"%s\",\"artist\":\"%s\",\"duration_sec\":%d,"
+                "\"direct_stream\":%s,"
+                "\"message\":\"Da len lich phat '%s' cua '%s' tren YouTube Music. Thiet bi se tu dong phat ngay sau khi ban noi xong.\"}",
+                title.c_str(), artist.c_str(), duration,
+                audio_url.empty() ? "false" : "true",
+                title.c_str(), artist.c_str());
+            return std::string(ret_buf);
+        };
 
-        // MCP Tool 6: Dieu khien trinh phat nhac
+        mcp_server.AddTool("self.music.search_and_play",
+            "Tim kiem va phat bai hat tren YouTube Music. Thiet bi se tu dong cho AI noi xong cau phan hoi roi moi bat dau phat nhac de tranh xung dot am thanh.\n"
+            "Tham so:\n"
+            "  `query`: Ten bai hat hoac tu khoa tim kiem tren YouTube Music (VD: 'See Tinh', 'Waiting For You', 'Chung Ta Cua Tuong Lai')\n"
+            "  `artist`: (Tuy chon) Ten ca si hoac nhac si\n"
+            "  `duration_sec`: (Tuy chon) Tong thoi luong bai hat tinh bang giay lay tu YouTube Music de dong bo thanh tien trinh LCD\n"
+            "  `audio_url`: (Tuy chon) URL luong am thanh truc tiep (OGG Opus) de loa phat ngay.",
+            PropertyList({
+                Property("query", kPropertyTypeString),
+                Property("artist", kPropertyTypeString, std::string("")),
+                Property("duration_sec", kPropertyTypeInteger, 0),
+                Property("audio_url", kPropertyTypeString, std::string(""))
+            }), yt_play_handler);
+
+        // Tool alias danh rieng cho YouTube Music
+        mcp_server.AddTool("self.youtube.play",
+            "Phat nhac tren YouTube Music voi dong bo thoi luong chuan xac.",
+            PropertyList({
+                Property("query", kPropertyTypeString),
+                Property("artist", kPropertyTypeString, std::string("")),
+                Property("duration_sec", kPropertyTypeInteger, 0),
+                Property("audio_url", kPropertyTypeString, std::string(""))
+            }), yt_play_handler);
+
+        // MCP Tool 6: Dieu khien trinh phat nhac YouTube Music
         mcp_server.AddTool("self.music.control",
-            "Dieu khien trinh phat nhac. Cac hanh dong: 'play' (tiep tuc), 'pause' (tam dung), 'stop' (dung phat), 'next' (bai tiep), 'prev' (bai truoc).",
+            "Dieu khien trinh phat nhac. Cac hanh dong: 'play' (tiep tuc), 'pause' (tam dung), 'stop' (dung phat).",
             PropertyList({
                 Property("action", kPropertyTypeString)
             }), [this](const PropertyList& properties) -> ReturnValue {
@@ -423,33 +427,26 @@ private:
                 if (env_display_) {
                     if (action == "pause" || action == "stop") {
                         env_display_->SetMusicPlayState(false);
-                        return std::string("{\"status\":\"paused\",\"message\":\"Da tam dung phat nhac\"}");
+                        return std::string("{\"status\":\"paused\",\"message\":\"Da tam dung phat nhac YouTube Music\"}");
                     } else if (action == "play" || action == "resume") {
                         env_display_->SetMusicPlayState(true);
-                        return std::string("{\"status\":\"playing\",\"message\":\"Da tiep tuc phat nhac\"}");
-                    } else if (action == "next") {
-                        env_display_->SetMusicTrack("Bai hat ke tiep", "Top Trending", env_display_->GetMusicPlatform(), 195);
-                        return std::string("{\"status\":\"playing\",\"message\":\"Da chuyen sang bai hat ke tiep\"}");
-                    } else if (action == "prev") {
-                        env_display_->SetMusicTrack("Bai hat truoc do", "History", env_display_->GetMusicPlatform(), 210);
-                        return std::string("{\"status\":\"playing\",\"message\":\"Da quay lai bai hat truoc do\"}");
+                        return std::string("{\"status\":\"playing\",\"message\":\"Da tiep tuc phat nhac YouTube Music\"}");
                     }
                 }
-                return std::string("{\"status\":\"error\",\"message\":\"Khong hop le\"}");
+                return std::string("{\"status\":\"error\",\"message\":\"Hanh dong khong hop le\"}");
             });
 
         // MCP Tool 7: Lay thong tin bai hat dang phat
         mcp_server.AddTool("self.music.get_status",
-            "Lay thong tin bai hat va trang thai cua trinh phat nhac tren thiet bi.",
+            "Lay thong tin bai hat va trang thai cua trinh phat nhac YouTube Music tren thiet bi.",
             PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
                 if (!env_display_) {
                     return std::string("{\"status\":\"idle\"}");
                 }
                 char buf[256];
                 snprintf(buf, sizeof(buf),
-                    "{\"playing\":%s,\"platform\":\"%s\",\"title\":\"%s\",\"artist\":\"%s\",\"current_sec\":%d,\"total_sec\":%d}",
+                    "{\"playing\":%s,\"platform\":\"YouTube Music\",\"title\":\"%s\",\"artist\":\"%s\",\"current_sec\":%d,\"total_sec\":%d}",
                     env_display_->IsMusicPlaying() ? "true" : "false",
-                    env_display_->GetMusicPlatform().c_str(),
                     env_display_->GetMusicTitle().c_str(),
                     env_display_->GetMusicArtist().c_str(),
                     env_display_->GetMusicCurSec(),
@@ -457,31 +454,28 @@ private:
                 return std::string(buf);
             });
 
-        // MCP Tool 8: Thiet lap thong tin bai hat dang phat
+        // MCP Tool 8: Thiet lap thong tin bai hat YouTube Music dang phat
         mcp_server.AddTool("self.music.set_track",
-            "Thiet lap thong tin bai hat hien thi len man hinh LCD.\n"
+            "Thiet lap thong tin bai hat YouTube Music hien thi len man hinh LCD.\n"
             "Tham so:\n"
             "  `title`: Ten bai hat\n"
             "  `artist`: Ca si / Nhac si\n"
-            "  `platform`: Nen tang ('Spotify', 'YouTube Music', 'MP3 Online')\n"
-            "  `duration_sec`: Thoi luong bai hat tinh bang giay\n"
+            "  `duration_sec`: Tong thoi luong bai hat tinh bang giay (dong bo voi YouTube Music)\n"
             "  `audio_url`: (Tuy chon) URL luong am thanh truc tiep de loa phat ngay.",
             PropertyList({
                 Property("title", kPropertyTypeString),
-                Property("artist", kPropertyTypeString),
-                Property("platform", kPropertyTypeString, std::string("Spotify")),
+                Property("artist", kPropertyTypeString, std::string("YouTube Music")),
                 Property("duration_sec", kPropertyTypeInteger, 210),
                 Property("audio_url", kPropertyTypeString, std::string(""))
             }), [this](const PropertyList& properties) -> ReturnValue {
                 std::string title = properties["title"].value<std::string>();
                 std::string artist = properties["artist"].value<std::string>();
-                std::string platform = properties["platform"].value<std::string>();
                 int duration = properties["duration_sec"].value<int>();
                 std::string audio_url = properties["audio_url"].value<std::string>();
 
-                PlayMusicAfterSpeaking(audio_url, title, artist, platform, duration);
+                PlayMusicAfterSpeaking(audio_url, title, artist, duration);
 
-                return std::string("{\"status\":\"success\"}");
+                return std::string("{\"status\":\"success\",\"platform\":\"YouTube Music\"}");
             });
 
         // MCP Tool 9: Cap nhat thoi luong bai hat va vi tri phat
@@ -501,6 +495,13 @@ private:
                     return std::string("{\"status\":\"success\"}");
                 }
                 return std::string("{\"status\":\"error\"}");
+            });
+
+        // MCP Tool 10: Lay Cookie YouTube Music da duoc cau hinh tren thiet bi
+        mcp_server.AddTool("self.youtube.get_cookie",
+            "Lay chuoi Cookie YouTube Music da duoc cau hinh tren phan cung de server XiaoZhi goi API YouTube Music.",
+            PropertyList(), [](const PropertyList&) -> ReturnValue {
+                return std::string(YOUTUBE_MUSIC_COOKIE);
             });
     }
 
@@ -523,6 +524,14 @@ public:
         // Khoi dong trinh quan ly 4 che do hien thi moi truong (DHT11 + Charts)
         env_display_ = new EnvDisplayManager(display_, &dht11_);
         env_display_->Start();
+
+        // Tu dong ngat luong am thanh khi thoi luong bai hat ket thuc
+        env_display_->SetPlaybackCompletedCallback([this]() {
+            ESP_LOGI(TAG, "YouTube Music track duration finished. Stopping notification player.");
+            Application::GetInstance().Schedule([]() {
+                Application::GetInstance().StopNotification();
+            });
+        });
 
         if (DISPLAY_BACKLIGHT_PIN != GPIO_NUM_NC) {
             GetBacklight()->RestoreBrightness();
