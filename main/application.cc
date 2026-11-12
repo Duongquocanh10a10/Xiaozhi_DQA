@@ -233,6 +233,12 @@ void Application::Run() {
                 pending_listening_start_ = false;
                 StartListeningAudio();
             }
+            if (pending_notification_ && audio_service_.IsPlaybackIdle() &&
+                (GetDeviceState() == kDeviceStateIdle || GetDeviceState() == kDeviceStateListening)) {
+                auto notif = std::move(*pending_notification_);
+                pending_notification_.reset();
+                StartNotification(std::move(notif.audio_url), std::move(notif.subtitles));
+            }
         }
 
         if (bits & MAIN_EVENT_TOGGLE_CHAT) {
@@ -1192,10 +1198,17 @@ void Application::ConfigureWakeWordForListening() {
 }
 
 void Application::StartNotification(std::string audio_url, std::vector<NotifySubtitle> subtitles) {
-    if (GetDeviceState() != kDeviceStateIdle || notify_player_.IsBusy()) {
-        ESP_LOGW(TAG, "Ignoring notify message while device is busy");
+    if (GetDeviceState() == kDeviceStateSpeaking || (GetDeviceState() != kDeviceStateIdle && GetDeviceState() != kDeviceStateListening)) {
+        ESP_LOGI(TAG, "Device is speaking or busy (state=%d), queueing notification until speech finishes", (int)GetDeviceState());
+        pending_notification_ = PendingNotification{std::move(audio_url), std::move(subtitles)};
         return;
     }
+
+    if (notify_player_.IsBusy()) {
+        ESP_LOGW(TAG, "Notify player is currently busy, stopping previous and restarting");
+        notify_player_.Stop();
+    }
+    pending_notification_.reset();
 
     auto& board = Board::GetInstance();
     board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
@@ -1238,6 +1251,7 @@ void Application::StartNotification(std::string audio_url, std::vector<NotifySub
 }
 
 void Application::StopNotification() {
+    pending_notification_.reset();
     notify_player_.Stop();
     audio_service_.ResetDecoder();
     auto& board = Board::GetInstance();

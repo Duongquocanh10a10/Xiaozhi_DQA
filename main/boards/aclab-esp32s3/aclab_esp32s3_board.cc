@@ -235,6 +235,61 @@ private:
         power_save_timer_->SetEnabled(true);
     }
 
+    void PlayMusicAfterSpeaking(const std::string& audio_url, const std::string& title, const std::string& artist, const std::string& platform, int duration_sec) {
+        struct PlaybackJob {
+            AclabEsp32S3Board* board;
+            std::string audio_url;
+            std::string title;
+            std::string artist;
+            std::string platform;
+            int duration_sec;
+        };
+
+        auto job = new PlaybackJob{this, audio_url, title, artist, platform, duration_sec};
+
+        xTaskCreate([](void* arg) {
+            auto j = static_cast<PlaybackJob*>(arg);
+            ESP_LOGI(TAG, "PlaybackJob: Waiting for AI speech to finish before starting music...");
+
+            auto& app = Application::GetInstance();
+            // Cho thoi gian 400ms de neu AI chuan bi phat TTS thi state kip chuyen sang Speaking
+            vTaskDelay(pdMS_TO_TICKS(400));
+
+            // Cho toi da 15 giay cho den khi AI noi xong hoan toan va audio buffer xa sach
+            int waited_ms = 0;
+            while (waited_ms < 15000) {
+                DeviceState state = app.GetDeviceState();
+                bool audio_idle = app.GetAudioService().IsPlaybackIdle();
+                if (state != kDeviceStateSpeaking && audio_idle) {
+                    ESP_LOGI(TAG, "PlaybackJob: AI speech done (state=%d), starting music now!", (int)state);
+                    break;
+                }
+                vTaskDelay(pdMS_TO_TICKS(100));
+                waited_ms += 100;
+            }
+
+            vTaskDelay(pdMS_TO_TICKS(200));
+
+            // Cap nhat giao dien Mode 5 voi thong tin bai hat va thoi luong chuan
+            if (j->board->env_display_) {
+                j->board->env_display_->SetMusicTrack(j->title, j->artist, j->platform, j->duration_sec);
+            }
+
+            // Phat luong audio stream neu co link
+            if (!j->audio_url.empty()) {
+                ESP_LOGI(TAG, "PlaybackJob: Starting direct audio stream: %s", j->audio_url.c_str());
+                app.Schedule([url = j->audio_url]() {
+                    Application::GetInstance().StartNotification(url, {});
+                });
+            } else {
+                app.PlaySound(Lang::Sounds::OGG_POPUP);
+            }
+
+            delete j;
+            vTaskDelete(NULL);
+        }, "music_delay_task", 4096, job, 2, NULL);
+    }
+
     void InitializeTools() {
         // Ngoai vi LED tren GPIO 38
         static LampController lamp(LAMP_GPIO);
@@ -290,19 +345,21 @@ private:
 
         // MCP Tool 5: Tim kiem va phat nhac tren Spotify, YouTube Music, MP3
         mcp_server.AddTool("self.music.search_and_play",
-            "Tim kiem va phat bai hat tren Spotify, YouTube Music hoac MP3. Chuyen man hinh LCD sang Mode 5 (Music Player) va bat dau phat nhac.\n"
-            "Luu y cho AI Server: Khi goi tool nay, neu co URL luong am thanh truc tiep (audio stream OGG Opus / MP3), hay truyen vao tham so `audio_url` de thiet bi tu phat ra loa. Neu khong co URL, AI/Server BAT BUOC PHAI TIEP TUC STREAM AM THANH bai hat qua kenh WebSocket/Opus de loa phat nhac cho nguoi dung.\n"
+            "Tim kiem va phat bai hat tren Spotify, YouTube Music hoac MP3. Thiet bi se tu dong cho AI noi xong cau phan hoi roi moi bat dau phat nhac de tranh xung dot am thanh.\n"
             "Tham so:\n"
             "  `query`: Ten bai hat hoac tu khoa tim kiem (VD: 'See Tinh', 'Waiting For You', 'Son Tung M-TP')\n"
             "  `platform`: Nen tang phat ('spotify', 'youtube', 'mp3'). Mac dinh la 'spotify'.\n"
-            "  `audio_url`: (Tuy chon) URL luong am thanh truc tiep de loa phat ngay.",
+            "  `duration_sec`: (Tuy chon) Thoi luong bai hat tinh bang giay (VD: 245 cho 4 phut 5 giay). Neu khong truyen se tu dong uoc tinh.\n"
+            "  `audio_url`: (Tuy chon) URL luong am thanh truc tiep (OGG Opus / stream) de loa phat ngay.",
             PropertyList({
                 Property("query", kPropertyTypeString),
                 Property("platform", kPropertyTypeString, std::string("spotify")),
+                Property("duration_sec", kPropertyTypeInteger, 0),
                 Property("audio_url", kPropertyTypeString, std::string(""))
             }), [this](const PropertyList& properties) -> ReturnValue {
                 std::string query = properties["query"].value<std::string>();
                 std::string platform = properties["platform"].value<std::string>();
+                int duration = properties["duration_sec"].value<int>();
                 std::string audio_url = properties["audio_url"].value<std::string>();
 
                 // Chuan hoa ten nen tang
@@ -330,28 +387,19 @@ private:
                     }
                 }
 
-                int duration = 210; // 3 phut 30 giay
-                if (env_display_) {
-                    env_display_->SetMusicTrack(title, artist, norm_platform, duration);
+                if (duration <= 0) {
+                    duration = 215; // Mac dinh 3 phut 35 giay
                 }
 
-                // Phat am thanh thong bao bat dau phat nhac qua loa MAX98357A
-                Application::GetInstance().PlaySound(Lang::Sounds::OGG_POPUP);
-
-                // Neu co audio_url truc tiep tu server hoac nguoi dung, phat ngay qua NotifyPlayer
-                if (!audio_url.empty()) {
-                    ESP_LOGI(TAG, "Playing direct audio stream: %s", audio_url.c_str());
-                    Application::GetInstance().Schedule([audio_url]() {
-                        Application::GetInstance().StartNotification(audio_url, {});
-                    });
-                }
+                // Cho AI noi xong roi moi kich hoat giao dien Mode 5 va phat nhac
+                PlayMusicAfterSpeaking(audio_url, title, artist, norm_platform, duration);
 
                 char ret_buf[512];
                 snprintf(ret_buf, sizeof(ret_buf),
-                    "{\"status\":\"playing\",\"platform\":\"%s\",\"title\":\"%s\",\"artist\":\"%s\",\"duration\":\"%02d:%02d\","
+                    "{\"status\":\"scheduled\",\"platform\":\"%s\",\"title\":\"%s\",\"artist\":\"%s\",\"duration_sec\":%d,"
                     "\"direct_stream\":%s,"
-                    "\"message\":\"Da bat giao dien phat bai %s tren %s. AI/Server hay tiep tuc stream am thanh bai hat nay qua kenh audio cho loa thiet bi.\"}",
-                    norm_platform.c_str(), title.c_str(), artist.c_str(), duration / 60, duration % 60,
+                    "\"message\":\"Da len lich phat bai %s tren %s. Thiet bi se tu dong phat ngay sau khi ban noi xong.\"}",
+                    norm_platform.c_str(), title.c_str(), artist.c_str(), duration,
                     audio_url.empty() ? "false" : "true",
                     title.c_str(), norm_platform.c_str());
                 return std::string(ret_buf);
@@ -431,18 +479,28 @@ private:
                 int duration = properties["duration_sec"].value<int>();
                 std::string audio_url = properties["audio_url"].value<std::string>();
 
-                if (env_display_) {
-                    env_display_->SetMusicTrack(title, artist, platform, duration);
-                }
-
-                if (!audio_url.empty()) {
-                    ESP_LOGI(TAG, "Playing direct audio stream: %s", audio_url.c_str());
-                    Application::GetInstance().Schedule([audio_url]() {
-                        Application::GetInstance().StartNotification(audio_url, {});
-                    });
-                }
+                PlayMusicAfterSpeaking(audio_url, title, artist, platform, duration);
 
                 return std::string("{\"status\":\"success\"}");
+            });
+
+        // MCP Tool 9: Cap nhat thoi luong bai hat va vi tri phat
+        mcp_server.AddTool("self.music.set_duration",
+            "Cap nhat thoi luong bai hat va vi tri hien tai len thanh tien trinh LCD (Mode 5).\n"
+            "Tham so:\n"
+            "  `total_sec`: Tong thoi luong bai hat tinh bang giay (VD: 240 cho 4 phut)\n"
+            "  `current_sec`: (Tuy chon) Vi tri thoi gian phat hien tai tinh bang giay.",
+            PropertyList({
+                Property("total_sec", kPropertyTypeInteger),
+                Property("current_sec", kPropertyTypeInteger, -1)
+            }), [this](const PropertyList& properties) -> ReturnValue {
+                int total_sec = properties["total_sec"].value<int>();
+                int current_sec = properties["current_sec"].value<int>();
+                if (env_display_) {
+                    env_display_->SetMusicDuration(total_sec, current_sec);
+                    return std::string("{\"status\":\"success\"}");
+                }
+                return std::string("{\"status\":\"error\"}");
             });
     }
 

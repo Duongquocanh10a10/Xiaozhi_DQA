@@ -649,8 +649,13 @@ public:
 
         if (music_is_playing_) {
             music_cur_sec_++;
-            if (music_cur_sec_ > music_total_sec_) {
-                music_cur_sec_ = 0;
+            if (music_cur_sec_ >= music_total_sec_) {
+                music_cur_sec_ = music_total_sec_;
+                music_is_playing_ = false;
+                if (music_status_label_) {
+                    lv_label_set_text(music_status_label_, "[ HOAN TAT ]");
+                    lv_obj_set_style_text_color(music_status_label_, lv_color_hex(0x29B6F6), 0);
+                }
             }
             if (music_progress_bar_) {
                 int pct = (music_total_sec_ > 0) ? (music_cur_sec_ * 100) / music_total_sec_ : 0;
@@ -729,6 +734,19 @@ public:
 
     void SetMusicPlayState(bool playing) {
         music_is_playing_ = playing;
+        if (!display_) return;
+        DisplayLockGuard lock(display_);
+        EnsureViews();
+        UpdateMusicUi();
+    }
+
+    void SetMusicDuration(int total_sec, int current_sec = -1) {
+        if (total_sec > 0) {
+            music_total_sec_ = total_sec;
+        }
+        if (current_sec >= 0) {
+            music_cur_sec_ = current_sec;
+        }
         if (!display_) return;
         DisplayLockGuard lock(display_);
         EnsureViews();

@@ -13,6 +13,7 @@
 #include <functional>
 #include <cstdint>
 #include <vector>
+#include <optional>
 
 #include "protocol.h"
 #include "ota.h"
@@ -157,6 +158,11 @@ private:
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
     bool pending_listening_start_ = false;  // Waiting for playback to drain before starting listening (auto mode)
+    struct PendingNotification {
+        std::string audio_url;
+        std::vector<NotifySubtitle> subtitles;
+    };
+    std::optional<PendingNotification> pending_notification_;
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
 
