@@ -8,6 +8,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <string>
+#include <algorithm>
 
 #define TAG_ENV_UI "EnvDisplayManager"
 #define HIST_SAMPLES 12
@@ -16,7 +17,8 @@ enum DisplayMode {
     kModeXiaozhi = 1,
     kModeTempChart = 2,
     kModeHumiChart = 3,
-    kModeDual = 4
+    kModeDual = 4,
+    kModeMusic = 5
 };
 
 class EnvDisplayManager {
@@ -47,6 +49,24 @@ private:
     lv_obj_t* dual_temp_bar_ = nullptr;
     lv_obj_t* dual_humi_bar_ = nullptr;
 
+    // View 5: Music Player
+    lv_obj_t* music_view_ = nullptr;
+    lv_obj_t* music_badge_ = nullptr;
+    lv_obj_t* music_title_label_ = nullptr;
+    lv_obj_t* music_artist_label_ = nullptr;
+    lv_obj_t* music_time_label_ = nullptr;
+    lv_obj_t* music_status_label_ = nullptr;
+    lv_obj_t* music_progress_bar_ = nullptr;
+    lv_obj_t* music_eq_bars_[8] = {nullptr};
+
+    // Music playback state
+    std::string music_title_ = "Chua phat nhac";
+    std::string music_artist_ = "XiaoZhi Music";
+    std::string music_platform_ = "Spotify"; // "Spotify", "YouTube Music", "MP3 Online"
+    bool music_is_playing_ = false;
+    int music_cur_sec_ = 0;
+    int music_total_sec_ = 210;
+
     TaskHandle_t update_task_handle_ = nullptr;
 
     void EnsureViews() {
@@ -65,7 +85,7 @@ private:
         }
         if (!parent_layer) return;
 
-        ESP_LOGI(TAG_ENV_UI, "Creating Environmental UI overlay on lv_layer_top");
+        ESP_LOGI(TAG_ENV_UI, "Creating UI overlay on lv_layer_top");
 
         // Overlay container covers the full 128x160 screen with dark background
         overlay_container_ = lv_obj_create(parent_layer);
@@ -239,6 +259,76 @@ private:
         lv_bar_set_value(dual_humi_bar_, 60, LV_ANIM_OFF);
         lv_obj_set_style_bg_color(dual_humi_bar_, lv_color_hex(0x2196F3), LV_PART_INDICATOR);
 
+        // ==========================================
+        // VIEW 5: MUSIC PLAYER (Spotify / YT Music / MP3)
+        // ==========================================
+        music_view_ = lv_obj_create(overlay_container_);
+        lv_obj_set_size(music_view_, 124, 156);
+        lv_obj_align(music_view_, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_set_style_bg_color(music_view_, lv_color_hex(0x121212), 0);
+        lv_obj_set_style_border_color(music_view_, lv_color_hex(0x1DB954), 0);
+        lv_obj_set_style_border_width(music_view_, 1, 0);
+        lv_obj_set_style_pad_all(music_view_, 2, 0);
+
+        // Platform badge
+        music_badge_ = lv_label_create(music_view_);
+        lv_label_set_text(music_badge_, "[ SPOTIFY ]");
+        lv_obj_set_style_text_color(music_badge_, lv_color_hex(0x1DB954), 0);
+        lv_obj_align(music_badge_, LV_ALIGN_TOP_MID, 0, 2);
+
+        // Equalizer container (8 bars)
+        lv_obj_t* music_eq_box = lv_obj_create(music_view_);
+        lv_obj_set_size(music_eq_box, 96, 32);
+        lv_obj_align(music_eq_box, LV_ALIGN_TOP_MID, 0, 20);
+        lv_obj_set_style_bg_color(music_eq_box, lv_color_hex(0x1E1E1E), 0);
+        lv_obj_set_style_border_width(music_eq_box, 0, 0);
+        lv_obj_set_style_pad_all(music_eq_box, 2, 0);
+        lv_obj_set_style_radius(music_eq_box, 4, 0);
+
+        for (int i = 0; i < 8; i++) {
+            music_eq_bars_[i] = lv_bar_create(music_eq_box);
+            lv_obj_set_size(music_eq_bars_[i], 6, 26);
+            lv_obj_align(music_eq_bars_[i], LV_ALIGN_TOP_LEFT, 6 + i * 10, 1);
+            lv_bar_set_range(music_eq_bars_[i], 0, 100);
+            lv_bar_set_value(music_eq_bars_[i], 15 + i * 8, LV_ANIM_OFF);
+            lv_obj_set_style_bg_color(music_eq_bars_[i], lv_color_hex(0x1DB954), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(music_eq_bars_[i], lv_color_hex(0x2C2C2C), LV_PART_MAIN);
+            lv_obj_set_style_radius(music_eq_bars_[i], 1, 0);
+        }
+
+        // Song title
+        music_title_label_ = lv_label_create(music_view_);
+        lv_label_set_text(music_title_label_, "Chua phat nhac");
+        lv_obj_set_style_text_color(music_title_label_, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_align(music_title_label_, LV_ALIGN_TOP_MID, 0, 56);
+
+        // Artist name
+        music_artist_label_ = lv_label_create(music_view_);
+        lv_label_set_text(music_artist_label_, "XiaoZhi Music");
+        lv_obj_set_style_text_color(music_artist_label_, lv_color_hex(0x90A4AE), 0);
+        lv_obj_align(music_artist_label_, LV_ALIGN_TOP_MID, 0, 74);
+
+        // Progress bar
+        music_progress_bar_ = lv_bar_create(music_view_);
+        lv_obj_set_size(music_progress_bar_, 106, 4);
+        lv_obj_align(music_progress_bar_, LV_ALIGN_TOP_MID, 0, 95);
+        lv_bar_set_range(music_progress_bar_, 0, 100);
+        lv_bar_set_value(music_progress_bar_, 0, LV_ANIM_OFF);
+        lv_obj_set_style_bg_color(music_progress_bar_, lv_color_hex(0x1DB954), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(music_progress_bar_, lv_color_hex(0x2A2A2A), LV_PART_MAIN);
+
+        // Time label
+        music_time_label_ = lv_label_create(music_view_);
+        lv_label_set_text(music_time_label_, "00:00 / 03:30");
+        lv_obj_set_style_text_color(music_time_label_, lv_color_hex(0x78909C), 0);
+        lv_obj_align(music_time_label_, LV_ALIGN_TOP_MID, 0, 103);
+
+        // Status / control label
+        music_status_label_ = lv_label_create(music_view_);
+        lv_label_set_text(music_status_label_, "[ || TAM DUNG ]");
+        lv_obj_set_style_text_color(music_status_label_, lv_color_hex(0xFFA726), 0);
+        lv_obj_align(music_status_label_, LV_ALIGN_BOTTOM_MID, 0, -4);
+
         // Default to Mode 1 (Xiaozhi mode: overlay hidden)
         ApplyModeVisibility(kModeXiaozhi);
     }
@@ -255,10 +345,11 @@ private:
         lv_obj_remove_flag(overlay_container_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(overlay_container_);
 
-        // Hide all 3 sub-views first
+        // Hide all 4 sub-views first
         lv_obj_add_flag(temp_view_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(humi_view_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(dual_view_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(music_view_, LV_OBJ_FLAG_HIDDEN);
 
         // Show requested view
         if (mode == kModeTempChart) {
@@ -267,6 +358,94 @@ private:
             lv_obj_remove_flag(humi_view_, LV_OBJ_FLAG_HIDDEN);
         } else if (mode == kModeDual) {
             lv_obj_remove_flag(dual_view_, LV_OBJ_FLAG_HIDDEN);
+        } else if (mode == kModeMusic) {
+            lv_obj_remove_flag(music_view_, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    void AnimateMusicEq() {
+        if (!music_view_) return;
+
+        if (!music_is_playing_) {
+            for (int i = 0; i < 8; i++) {
+                if (music_eq_bars_[i]) {
+                    lv_bar_set_value(music_eq_bars_[i], 6, LV_ANIM_OFF);
+                }
+            }
+            return;
+        }
+
+        static const uint8_t eq_pattern[6][8] = {
+            {55, 90, 40, 85, 45, 95, 65, 30},
+            {80, 45, 95, 35, 75, 40, 90, 60},
+            {35, 75, 50, 95, 30, 85, 45, 80},
+            {90, 60, 80, 40, 90, 50, 70, 35},
+            {65, 85, 45, 70, 90, 60, 85, 50},
+            {40, 60, 90, 50, 65, 95, 40, 75}
+        };
+        static int pat_idx = 0;
+        pat_idx = (pat_idx + 1) % 6;
+
+        for (int i = 0; i < 8; i++) {
+            if (music_eq_bars_[i]) {
+                lv_bar_set_value(music_eq_bars_[i], eq_pattern[pat_idx][i], LV_ANIM_OFF);
+            }
+        }
+    }
+
+    void UpdateMusicUi() {
+        if (!music_view_) return;
+
+        lv_color_t color;
+        const char* badge_text = "[ SPOTIFY ]";
+        if (music_platform_.find("You") != std::string::npos || music_platform_.find("yt") != std::string::npos || music_platform_.find("YT") != std::string::npos) {
+            color = lv_color_hex(0xFF3333); // Red
+            badge_text = "[ YT MUSIC ]";
+        } else if (music_platform_.find("MP3") != std::string::npos || music_platform_.find("mp3") != std::string::npos || music_platform_.find("Zing") != std::string::npos) {
+            color = lv_color_hex(0x00E5FF); // Cyan
+            badge_text = "[ MP3 ONLINE ]";
+        } else {
+            color = lv_color_hex(0x1DB954); // Spotify Green
+            badge_text = "[ SPOTIFY ]";
+        }
+
+        lv_obj_set_style_border_color(music_view_, color, 0);
+        if (music_badge_) {
+            lv_label_set_text(music_badge_, badge_text);
+            lv_obj_set_style_text_color(music_badge_, color, 0);
+        }
+        if (music_title_label_) {
+            lv_label_set_text(music_title_label_, music_title_.c_str());
+        }
+        if (music_artist_label_) {
+            lv_label_set_text(music_artist_label_, music_artist_.c_str());
+        }
+        if (music_progress_bar_) {
+            int pct = (music_total_sec_ > 0) ? (music_cur_sec_ * 100) / music_total_sec_ : 0;
+            if (pct > 100) pct = 100;
+            lv_bar_set_value(music_progress_bar_, pct, LV_ANIM_OFF);
+            lv_obj_set_style_bg_color(music_progress_bar_, color, LV_PART_INDICATOR);
+        }
+        for (int i = 0; i < 8; i++) {
+            if (music_eq_bars_[i]) {
+                lv_obj_set_style_bg_color(music_eq_bars_[i], color, LV_PART_INDICATOR);
+            }
+        }
+        if (music_time_label_) {
+            char time_buf[32];
+            snprintf(time_buf, sizeof(time_buf), "%02d:%02d / %02d:%02d",
+                     music_cur_sec_ / 60, music_cur_sec_ % 60,
+                     music_total_sec_ / 60, music_total_sec_ % 60);
+            lv_label_set_text(music_time_label_, time_buf);
+        }
+        if (music_status_label_) {
+            if (music_is_playing_) {
+                lv_label_set_text(music_status_label_, "[ > DANG PHAT ]");
+                lv_obj_set_style_text_color(music_status_label_, lv_color_hex(0x00E676), 0);
+            } else {
+                lv_label_set_text(music_status_label_, "[ || TAM DUNG ]");
+                lv_obj_set_style_text_color(music_status_label_, lv_color_hex(0xFFA726), 0);
+            }
         }
     }
 
@@ -276,19 +455,26 @@ public:
     }
 
     void Start() {
-        // Start background sensor sampling & UI refresh task (runs every 2 seconds)
+        // Start background sensor sampling & UI refresh task (runs every 1 second)
         xTaskCreate([](void* arg) {
             auto self = static_cast<EnvDisplayManager*>(arg);
             // Wait 1 second after boot so display SetupUI() completes first
             vTaskDelay(pdMS_TO_TICKS(1000));
+            int tick_counter = 0;
             while (true) {
-                self->UpdateData();
-                vTaskDelay(pdMS_TO_TICKS(2000));
+                tick_counter++;
+                // Read DHT11 every 2 seconds
+                if (tick_counter % 2 == 0) {
+                    self->UpdateSensorData();
+                }
+                // Update Music progress and animated equalizer every 1 second
+                self->UpdateMusicProgress();
+                vTaskDelay(pdMS_TO_TICKS(1000));
             }
         }, "env_ui_task", 4096, this, 3, &update_task_handle_);
     }
 
-    void UpdateData() {
+    void UpdateSensorData() {
         if (!dht_ || !display_) return;
 
         float t = 0.0f, h = 0.0f;
@@ -335,6 +521,35 @@ public:
         }
     }
 
+    void UpdateMusicProgress() {
+        if (!display_) return;
+
+        DisplayLockGuard lock(display_);
+        EnsureViews();
+        if (!overlay_container_) return;
+
+        if (music_is_playing_) {
+            music_cur_sec_++;
+            if (music_cur_sec_ > music_total_sec_) {
+                music_cur_sec_ = 0;
+            }
+            if (music_progress_bar_) {
+                int pct = (music_total_sec_ > 0) ? (music_cur_sec_ * 100) / music_total_sec_ : 0;
+                if (pct > 100) pct = 100;
+                lv_bar_set_value(music_progress_bar_, pct, LV_ANIM_OFF);
+            }
+            if (music_time_label_) {
+                char time_buf[32];
+                snprintf(time_buf, sizeof(time_buf), "%02d:%02d / %02d:%02d",
+                         music_cur_sec_ / 60, music_cur_sec_ % 60,
+                         music_total_sec_ / 60, music_total_sec_ % 60);
+                lv_label_set_text(music_time_label_, time_buf);
+            }
+        }
+
+        AnimateMusicEq();
+    }
+
     void SetMode(DisplayMode mode) {
         if (!display_) return;
         DisplayLockGuard lock(display_);
@@ -348,27 +563,65 @@ public:
         return current_mode_;
     }
 
-    // Button 1: Chuyen vong tron giua Mode 1, Mode 2, Mode 3
-    void CycleMode123() {
-        ESP_LOGI(TAG_ENV_UI, "CycleMode123 called, current_mode=%d", (int)current_mode_);
+    // Button 1: Chuyen vong tron qua ca 5 Mode:
+    // Mode 1 (AI Xiaozhi) -> Mode 2 (Nhiet do) -> Mode 3 (Do am) -> Mode 4 (Moi truong kep) -> Mode 5 (Music) -> Mode 1
+    void CycleModeAll() {
+        ESP_LOGI(TAG_ENV_UI, "CycleModeAll called, current_mode=%d", (int)current_mode_);
         if (current_mode_ == kModeXiaozhi) {
             SetMode(kModeTempChart);
         } else if (current_mode_ == kModeTempChart) {
             SetMode(kModeHumiChart);
+        } else if (current_mode_ == kModeHumiChart) {
+            SetMode(kModeDual);
+        } else if (current_mode_ == kModeDual) {
+            SetMode(kModeMusic);
         } else {
             SetMode(kModeXiaozhi);
         }
     }
 
-    // Button 2: Chuyen sang Mode 4 (Hoac toggle ve Mode 1 neu dang o Mode 4)
-    void SwitchToMode4() {
-        ESP_LOGI(TAG_ENV_UI, "SwitchToMode4 called, current_mode=%d", (int)current_mode_);
-        if (current_mode_ != kModeDual) {
+    // Button 2: Chuyen nhanh sang Mode 4 (Moi truong) hoac Mode 5 (Music) hoac ve Mode 1
+    void SwitchToMode4Or5() {
+        ESP_LOGI(TAG_ENV_UI, "SwitchToMode4Or5 called, current_mode=%d", (int)current_mode_);
+        if (current_mode_ != kModeDual && current_mode_ != kModeMusic) {
             SetMode(kModeDual);
+        } else if (current_mode_ == kModeDual) {
+            SetMode(kModeMusic);
         } else {
             SetMode(kModeXiaozhi);
         }
     }
+
+    // Music control methods
+    void SetMusicTrack(const std::string& title, const std::string& artist, const std::string& platform, int duration_sec = 210) {
+        music_title_ = title;
+        music_artist_ = artist;
+        music_platform_ = platform;
+        music_cur_sec_ = 0;
+        music_total_sec_ = duration_sec > 0 ? duration_sec : 210;
+        music_is_playing_ = true;
+
+        if (!display_) return;
+        DisplayLockGuard lock(display_);
+        EnsureViews();
+        UpdateMusicUi();
+        SetMode(kModeMusic);
+    }
+
+    void SetMusicPlayState(bool playing) {
+        music_is_playing_ = playing;
+        if (!display_) return;
+        DisplayLockGuard lock(display_);
+        EnsureViews();
+        UpdateMusicUi();
+    }
+
+    std::string GetMusicTitle() const { return music_title_; }
+    std::string GetMusicArtist() const { return music_artist_; }
+    std::string GetMusicPlatform() const { return music_platform_; }
+    bool IsMusicPlaying() const { return music_is_playing_; }
+    int GetMusicCurSec() const { return music_cur_sec_; }
+    int GetMusicTotalSec() const { return music_total_sec_; }
 };
 
 #endif // ENV_DISPLAY_MANAGER_H_

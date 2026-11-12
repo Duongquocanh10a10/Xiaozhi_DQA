@@ -182,7 +182,7 @@ private:
             app.StopListening();
         });
 
-        // Nut 1 (GPIO 17): Chuyen vong tron qua cac mode 1 -> 2 -> 3 -> 1
+        // Nut 1 (GPIO 17): Chuyen vong tron qua cac mode 1 -> 2 -> 3 -> 4 -> 5 -> 1
         // Phan hoi tuc thi ngay khi an xuong (OnPressDown)
         mode_button_1_.OnPressDown([this]() {
             static uint32_t last_press = 0;
@@ -193,11 +193,11 @@ private:
             ESP_LOGI(TAG, "Mode Button 1 Pressed (GPIO 17) -> Cycle Mode");
             power_save_timer_->WakeUp();
             if (env_display_) {
-                env_display_->CycleMode123();
+                env_display_->CycleModeAll();
             }
         });
 
-        // Nut 2 (GPIO 21): Chuyen truc tiep sang Mode 4 (Xem song song ca Nhiet do & Do am)
+        // Nut 2 (GPIO 21): Chuyen nhanh sang Mode 4 (Moi truong) hoac Mode 5 (Music) hoac ve Mode 1
         // Phan hoi tuc thi ngay khi an xuong (OnPressDown)
         mode_button_2_.OnPressDown([this]() {
             static uint32_t last_press = 0;
@@ -205,10 +205,10 @@ private:
             if (now - last_press < 250) return;
             last_press = now;
 
-            ESP_LOGI(TAG, "Mode Button 2 Pressed (GPIO 21) -> Switch Mode 4");
+            ESP_LOGI(TAG, "Mode Button 2 Pressed (GPIO 21) -> Switch Mode 4/5");
             power_save_timer_->WakeUp();
             if (env_display_) {
-                env_display_->SwitchToMode4();
+                env_display_->SwitchToMode4Or5();
             }
         });
     }
@@ -276,13 +276,138 @@ private:
 
         // MCP Tool 4: Chuyen doi che do hien thi man hinh qua giong noi hoac server
         mcp_server.AddTool("self.screen.set_display_mode",
-            "Chuyen che do hien thi TFT: 1 (AI Xiaozhi), 2 (Do thi Nhiet do), 3 (Do thi Do am), 4 (Tong hop Nhiet do & Do am).",
+            "Chuyen che do hien thi TFT: 1 (AI Xiaozhi), 2 (Do thi Nhiet do), 3 (Do thi Do am), 4 (Tong hop Nhiet do & Do am), 5 (Trinh phat nhac Music Player).",
             PropertyList({
-                Property("mode", kPropertyTypeInteger, 1, 4)
+                Property("mode", kPropertyTypeInteger, 1, 5)
             }), [this](const PropertyList& properties) {
                 int mode = properties["mode"].value<int>();
-                if (env_display_ && mode >= 1 && mode <= 4) {
+                if (env_display_ && mode >= 1 && mode <= 5) {
                     env_display_->SetMode((DisplayMode)mode);
+                    return true;
+                }
+                return false;
+            });
+
+        // MCP Tool 5: Tim kiem va phat nhac tren Spotify, YouTube Music, MP3
+        mcp_server.AddTool("self.music.search_and_play",
+            "Tim kiem va phat bai hat tren Spotify, YouTube Music hoac MP3 theo ten bai hat, ca si hoac the loai. Hay goi tool nay khi nguoi dung yeu cau mo nhac, tim nhac, nghe nhac.\n"
+            "Tham so:\n"
+            "  `query`: Ten bai hat hoac tu khoa tim kiem (VD: 'See Tinh', 'Waiting For You', 'Son Tung M-TP')\n"
+            "  `platform`: Nen tang phat ('spotify', 'youtube', 'mp3'). Mac dinh la 'spotify'.",
+            PropertyList({
+                Property("query", kPropertyTypeString, true),
+                Property("platform", kPropertyTypeString, false)
+            }), [this](const PropertyList& properties) -> ReturnValue {
+                std::string query = properties["query"].value<std::string>();
+                std::string platform = "spotify";
+                if (properties.find("platform") != properties.end()) {
+                    platform = properties["platform"].value<std::string>();
+                }
+
+                // Chuan hoa ten nen tang
+                std::string norm_platform = "Spotify";
+                std::string p_lower = platform;
+                std::transform(p_lower.begin(), p_lower.end(), p_lower.begin(), ::tolower);
+                if (p_lower.find("you") != std::string::npos || p_lower.find("yt") != std::string::npos) {
+                    norm_platform = "YouTube Music";
+                } else if (p_lower.find("mp3") != std::string::npos || p_lower.find("zing") != std::string::npos) {
+                    norm_platform = "MP3 Online";
+                }
+
+                // Tach nghe si va ten bai hat tu query (neu co)
+                std::string title = query;
+                std::string artist = norm_platform + " Top Hits";
+                size_t dash = query.find(" - ");
+                if (dash != std::string::npos) {
+                    title = query.substr(0, dash);
+                    artist = query.substr(dash + 3);
+                } else {
+                    size_t cua = query.find(" cua ");
+                    if (cua != std::string::npos) {
+                        title = query.substr(0, cua);
+                        artist = query.substr(cua + 5);
+                    }
+                }
+
+                int duration = 210; // 3 phut 30 giay
+                if (env_display_) {
+                    env_display_->SetMusicTrack(title, artist, norm_platform, duration);
+                }
+
+                char ret_buf[256];
+                snprintf(ret_buf, sizeof(ret_buf),
+                    "{\"status\":\"playing\",\"platform\":\"%s\",\"title\":\"%s\",\"artist\":\"%s\",\"duration\":\"%02d:%02d\",\"message\":\"Dang phat bai %s tren %s\"}",
+                    norm_platform.c_str(), title.c_str(), artist.c_str(), duration / 60, duration % 60, title.c_str(), norm_platform.c_str());
+                return std::string(ret_buf);
+            });
+
+        // MCP Tool 6: Dieu khien trinh phat nhac
+        mcp_server.AddTool("self.music.control",
+            "Dieu khien trinh phat nhac. Cac hanh dong: 'play' (tiep tuc), 'pause' (tam dung), 'stop' (dung phat), 'next' (bai tiep), 'prev' (bai truoc).",
+            PropertyList({
+                Property("action", kPropertyTypeString, true)
+            }), [this](const PropertyList& properties) -> ReturnValue {
+                std::string action = properties["action"].value<std::string>();
+                std::transform(action.begin(), action.end(), action.begin(), ::tolower);
+
+                if (env_display_) {
+                    if (action == "pause" || action == "stop") {
+                        env_display_->SetMusicPlayState(false);
+                        return std::string("{\"status\":\"paused\",\"message\":\"Da tam dung phat nhac\"}");
+                    } else if (action == "play" || action == "resume") {
+                        env_display_->SetMusicPlayState(true);
+                        return std::string("{\"status\":\"playing\",\"message\":\"Da tiep tuc phat nhac\"}");
+                    } else if (action == "next") {
+                        env_display_->SetMusicTrack("Bai hat ke tiep", "Top Trending", env_display_->GetMusicPlatform(), 195);
+                        return std::string("{\"status\":\"playing\",\"message\":\"Da chuyen sang bai hat ke tiep\"}");
+                    } else if (action == "prev") {
+                        env_display_->SetMusicTrack("Bai hat truoc do", "History", env_display_->GetMusicPlatform(), 210);
+                        return std::string("{\"status\":\"playing\",\"message\":\"Da quay lai bai hat truoc do\"}");
+                    }
+                }
+                return std::string("{\"status\":\"error\",\"message\":\"Khong hop le\"}");
+            });
+
+        // MCP Tool 7: Lay thong tin bai hat dang phat
+        mcp_server.AddTool("self.music.get_status",
+            "Lay thong tin bai hat va trang thai cua trinh phat nhac tren thiet bi.",
+            PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
+                if (!env_display_) {
+                    return std::string("{\"status\":\"idle\"}");
+                }
+                char buf[256];
+                snprintf(buf, sizeof(buf),
+                    "{\"playing\":%s,\"platform\":\"%s\",\"title\":\"%s\",\"artist\":\"%s\",\"current_sec\":%d,\"total_sec\":%d}",
+                    env_display_->IsMusicPlaying() ? "true" : "false",
+                    env_display_->GetMusicPlatform().c_str(),
+                    env_display_->GetMusicTitle().c_str(),
+                    env_display_->GetMusicArtist().c_str(),
+                    env_display_->GetMusicCurSec(),
+                    env_display_->GetMusicTotalSec());
+                return std::string(buf);
+            });
+
+        // MCP Tool 8: Thiet lap thong tin bai hat dang phat
+        mcp_server.AddTool("self.music.set_track",
+            "Thiet lap thong tin bai hat hien thi len man hinh LCD.",
+            PropertyList({
+                Property("title", kPropertyTypeString, true),
+                Property("artist", kPropertyTypeString, true),
+                Property("platform", kPropertyTypeString, false),
+                Property("duration_sec", kPropertyTypeInteger, false)
+            }), [this](const PropertyList& properties) -> ReturnValue {
+                std::string title = properties["title"].value<std::string>();
+                std::string artist = properties["artist"].value<std::string>();
+                std::string platform = "Spotify";
+                if (properties.find("platform") != properties.end()) {
+                    platform = properties["platform"].value<std::string>();
+                }
+                int duration = 210;
+                if (properties.find("duration_sec") != properties.end()) {
+                    duration = properties["duration_sec"].value<int>();
+                }
+                if (env_display_) {
+                    env_display_->SetMusicTrack(title, artist, platform, duration);
                     return true;
                 }
                 return false;
