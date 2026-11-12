@@ -21,6 +21,117 @@ enum DisplayMode {
     kModeMusic = 5
 };
 
+// Chuyen doi ky tu tieng Viet co dau thanh chu khong dau chuan dep cho man hinh ST7735 (LVGL Basic Font)
+inline std::string SanitizeVietnameseForDisplay(const std::string& input) {
+    std::string out;
+    out.reserve(input.size());
+    size_t i = 0;
+    while (i < input.size()) {
+        unsigned char c = static_cast<unsigned char>(input[i]);
+        if (c < 0x80) {
+            out.push_back(input[i]);
+            i++;
+        } else if ((c & 0xE0) == 0xC0) { // 2-byte UTF-8
+            if (i + 1 < input.size()) {
+                unsigned char c2 = static_cast<unsigned char>(input[i + 1]);
+                uint16_t unicode = ((c & 0x1F) << 6) | (c2 & 0x3F);
+                switch (unicode) {
+                    // a, A
+                    case 0x00E0: case 0x00E1: case 0x00E2: case 0x00E3: case 0x00E5:
+                    case 0x0103: case 0x0105:
+                        out.push_back('a'); break;
+                    case 0x00C0: case 0x00C1: case 0x00C2: case 0x00C3: case 0x00C5:
+                    case 0x0102: case 0x0104:
+                        out.push_back('A'); break;
+                    // d, D
+                    case 0x0111: case 0x00F0:
+                        out.push_back('d'); break;
+                    case 0x0110: case 0x00D0:
+                        out.push_back('D'); break;
+                    // e, E
+                    case 0x00E8: case 0x00E9: case 0x00EA: case 0x00EB:
+                    case 0x0113: case 0x0115: case 0x0117: case 0x0119: case 0x011B:
+                        out.push_back('e'); break;
+                    case 0x00C8: case 0x00C9: case 0x00CA: case 0x00CB:
+                    case 0x0112: case 0x0114: case 0x0116: case 0x0118: case 0x011A:
+                        out.push_back('E'); break;
+                    // i, I
+                    case 0x00EC: case 0x00ED: case 0x00EE: case 0x00EF:
+                    case 0x0129: case 0x012B: case 0x012D: case 0x012F: case 0x0131:
+                        out.push_back('i'); break;
+                    case 0x00CC: case 0x00CD: case 0x00CE: case 0x00CF:
+                    case 0x0128: case 0x012A: case 0x012C: case 0x012E: case 0x0130:
+                        out.push_back('I'); break;
+                    // o, O
+                    case 0x00F2: case 0x00F3: case 0x00F4: case 0x00F5: case 0x00F6: case 0x00F8:
+                    case 0x014D: case 0x014F: case 0x0151: case 0x01A1:
+                        out.push_back('o'); break;
+                    case 0x00D2: case 0x00D3: case 0x00D4: case 0x00D5: case 0x00D6: case 0x00D8:
+                    case 0x014C: case 0x014E: case 0x0150: case 0x01A0:
+                        out.push_back('O'); break;
+                    // u, U
+                    case 0x00F9: case 0x00FA: case 0x00FB: case 0x00FC:
+                    case 0x0169: case 0x016B: case 0x016D: case 0x016F: case 0x0171: case 0x0173: case 0x01B0:
+                        out.push_back('u'); break;
+                    case 0x00D9: case 0x00DA: case 0x00DB: case 0x00DC:
+                    case 0x0168: case 0x016A: case 0x016C: case 0x016E: case 0x0170: case 0x0172: case 0x01AF:
+                        out.push_back('U'); break;
+                    // y, Y
+                    case 0x00FD: case 0x00FF: case 0x0177:
+                        out.push_back('y'); break;
+                    case 0x00DD: case 0x0176: case 0x0178:
+                        out.push_back('Y'); break;
+                    default:
+                        if (unicode < 0x0300 || unicode > 0x036F) {
+                            out.push_back(' ');
+                        }
+                        break;
+                }
+                i += 2;
+            } else {
+                i++;
+            }
+        } else if ((c & 0xF0) == 0xE0) { // 3-byte UTF-8
+            if (i + 2 < input.size()) {
+                unsigned char c2 = static_cast<unsigned char>(input[i + 1]);
+                unsigned char c3 = static_cast<unsigned char>(input[i + 2]);
+                uint32_t unicode = ((c & 0x0F) << 12) | ((c2 & 0x3F) << 6) | (c3 & 0x3F);
+                if (unicode >= 0x1EA0 && unicode <= 0x1EB7) {
+                    out.push_back((unicode % 2 == 0) ? 'A' : 'a');
+                } else if (unicode >= 0x1EB8 && unicode <= 0x1EC7) {
+                    out.push_back((unicode % 2 == 0) ? 'E' : 'e');
+                } else if (unicode >= 0x1EC8 && unicode <= 0x1ECB) {
+                    out.push_back((unicode % 2 == 0) ? 'I' : 'i');
+                } else if (unicode >= 0x1ECC && unicode <= 0x1EE3) {
+                    out.push_back((unicode % 2 == 0) ? 'O' : 'o');
+                } else if (unicode >= 0x1EE4 && unicode <= 0x1EF1) {
+                    out.push_back((unicode % 2 == 0) ? 'U' : 'u');
+                } else if (unicode >= 0x1EF2 && unicode <= 0x1EF9) {
+                    out.push_back((unicode % 2 == 0) ? 'Y' : 'y');
+                } else if (unicode == 0x2013 || unicode == 0x2014) {
+                    out.push_back('-');
+                } else if (unicode == 0x201C || unicode == 0x201D) {
+                    out.push_back('"');
+                } else if (unicode == 0x2018 || unicode == 0x2019) {
+                    out.push_back('\'');
+                } else if (unicode == 0x2026) {
+                    out.append("...");
+                } else {
+                    out.push_back(' ');
+                }
+                i += 3;
+            } else {
+                i++;
+            }
+        } else if ((c & 0xF8) == 0xF0) { // 4-byte UTF-8
+            i += 4;
+        } else {
+            i++;
+        }
+    }
+    return out;
+}
+
 class EnvDisplayManager {
 private:
     LcdDisplay* display_ = nullptr;
@@ -296,15 +407,21 @@ private:
             lv_obj_set_style_radius(music_eq_bars_[i], 1, 0);
         }
 
-        // Song title
+        // Song title (cuon chu tu dong neu ten dai)
         music_title_label_ = lv_label_create(music_view_);
         lv_label_set_text(music_title_label_, "Chua phat nhac");
+        lv_label_set_long_mode(music_title_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
+        lv_obj_set_width(music_title_label_, 116);
+        lv_obj_set_style_text_align(music_title_label_, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_style_text_color(music_title_label_, lv_color_hex(0xFFFFFF), 0);
         lv_obj_align(music_title_label_, LV_ALIGN_TOP_MID, 0, 56);
 
-        // Artist name
+        // Artist name (cuon chu tu dong neu ten dai)
         music_artist_label_ = lv_label_create(music_view_);
         lv_label_set_text(music_artist_label_, "XiaoZhi Music");
+        lv_label_set_long_mode(music_artist_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
+        lv_obj_set_width(music_artist_label_, 116);
+        lv_obj_set_style_text_align(music_artist_label_, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_style_text_color(music_artist_label_, lv_color_hex(0x90A4AE), 0);
         lv_obj_align(music_artist_label_, LV_ALIGN_TOP_MID, 0, 74);
 
@@ -415,10 +532,12 @@ private:
             lv_obj_set_style_text_color(music_badge_, color, 0);
         }
         if (music_title_label_) {
-            lv_label_set_text(music_title_label_, music_title_.c_str());
+            std::string safe_title = SanitizeVietnameseForDisplay(music_title_);
+            lv_label_set_text(music_title_label_, safe_title.c_str());
         }
         if (music_artist_label_) {
-            lv_label_set_text(music_artist_label_, music_artist_.c_str());
+            std::string safe_artist = SanitizeVietnameseForDisplay(music_artist_);
+            lv_label_set_text(music_artist_label_, safe_artist.c_str());
         }
         if (music_progress_bar_) {
             int pct = (music_total_sec_ > 0) ? (music_cur_sec_ * 100) / music_total_sec_ : 0;
@@ -594,8 +713,8 @@ public:
 
     // Music control methods
     void SetMusicTrack(const std::string& title, const std::string& artist, const std::string& platform, int duration_sec = 210) {
-        music_title_ = title;
-        music_artist_ = artist;
+        music_title_ = SanitizeVietnameseForDisplay(title);
+        music_artist_ = SanitizeVietnameseForDisplay(artist);
         music_platform_ = platform;
         music_cur_sec_ = 0;
         music_total_sec_ = duration_sec > 0 ? duration_sec : 210;

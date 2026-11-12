@@ -290,16 +290,20 @@ private:
 
         // MCP Tool 5: Tim kiem va phat nhac tren Spotify, YouTube Music, MP3
         mcp_server.AddTool("self.music.search_and_play",
-            "Tim kiem va phat bai hat tren Spotify, YouTube Music hoac MP3 theo ten bai hat, ca si hoac the loai. Hay goi tool nay khi nguoi dung yeu cau mo nhac, tim nhac, nghe nhac.\n"
+            "Tim kiem va phat bai hat tren Spotify, YouTube Music hoac MP3. Chuyen man hinh LCD sang Mode 5 (Music Player) va bat dau phat nhac.\n"
+            "Luu y cho AI Server: Khi goi tool nay, neu co URL luong am thanh truc tiep (audio stream OGG Opus / MP3), hay truyen vao tham so `audio_url` de thiet bi tu phat ra loa. Neu khong co URL, AI/Server BAT BUOC PHAI TIEP TUC STREAM AM THANH bai hat qua kenh WebSocket/Opus de loa phat nhac cho nguoi dung.\n"
             "Tham so:\n"
             "  `query`: Ten bai hat hoac tu khoa tim kiem (VD: 'See Tinh', 'Waiting For You', 'Son Tung M-TP')\n"
-            "  `platform`: Nen tang phat ('spotify', 'youtube', 'mp3'). Mac dinh la 'spotify'.",
+            "  `platform`: Nen tang phat ('spotify', 'youtube', 'mp3'). Mac dinh la 'spotify'.\n"
+            "  `audio_url`: (Tuy chon) URL luong am thanh truc tiep de loa phat ngay.",
             PropertyList({
                 Property("query", kPropertyTypeString),
-                Property("platform", kPropertyTypeString, std::string("spotify"))
+                Property("platform", kPropertyTypeString, std::string("spotify")),
+                Property("audio_url", kPropertyTypeString, std::string(""))
             }), [this](const PropertyList& properties) -> ReturnValue {
                 std::string query = properties["query"].value<std::string>();
                 std::string platform = properties["platform"].value<std::string>();
+                std::string audio_url = properties["audio_url"].value<std::string>();
 
                 // Chuan hoa ten nen tang
                 std::string norm_platform = "Spotify";
@@ -331,10 +335,25 @@ private:
                     env_display_->SetMusicTrack(title, artist, norm_platform, duration);
                 }
 
-                char ret_buf[256];
+                // Phat am thanh thong bao bat dau phat nhac qua loa MAX98357A
+                Application::GetInstance().PlaySound(Lang::Sounds::OGG_POPUP);
+
+                // Neu co audio_url truc tiep tu server hoac nguoi dung, phat ngay qua NotifyPlayer
+                if (!audio_url.empty()) {
+                    ESP_LOGI(TAG, "Playing direct audio stream: %s", audio_url.c_str());
+                    Application::GetInstance().Schedule([audio_url]() {
+                        Application::GetInstance().StartNotification(audio_url, {});
+                    });
+                }
+
+                char ret_buf[512];
                 snprintf(ret_buf, sizeof(ret_buf),
-                    "{\"status\":\"playing\",\"platform\":\"%s\",\"title\":\"%s\",\"artist\":\"%s\",\"duration\":\"%02d:%02d\",\"message\":\"Dang phat bai %s tren %s\"}",
-                    norm_platform.c_str(), title.c_str(), artist.c_str(), duration / 60, duration % 60, title.c_str(), norm_platform.c_str());
+                    "{\"status\":\"playing\",\"platform\":\"%s\",\"title\":\"%s\",\"artist\":\"%s\",\"duration\":\"%02d:%02d\","
+                    "\"direct_stream\":%s,"
+                    "\"message\":\"Da bat giao dien phat bai %s tren %s. AI/Server hay tiep tuc stream am thanh bai hat nay qua kenh audio cho loa thiet bi.\"}",
+                    norm_platform.c_str(), title.c_str(), artist.c_str(), duration / 60, duration % 60,
+                    audio_url.empty() ? "false" : "true",
+                    title.c_str(), norm_platform.c_str());
                 return std::string(ret_buf);
             });
 
@@ -346,6 +365,12 @@ private:
             }), [this](const PropertyList& properties) -> ReturnValue {
                 std::string action = properties["action"].value<std::string>();
                 std::transform(action.begin(), action.end(), action.begin(), ::tolower);
+
+                if (action == "stop" || action == "pause") {
+                    Application::GetInstance().Schedule([]() {
+                        Application::GetInstance().StopNotification();
+                    });
+                }
 
                 if (env_display_) {
                     if (action == "pause" || action == "stop") {
@@ -386,22 +411,38 @@ private:
 
         // MCP Tool 8: Thiet lap thong tin bai hat dang phat
         mcp_server.AddTool("self.music.set_track",
-            "Thiet lap thong tin bai hat hien thi len man hinh LCD.",
+            "Thiet lap thong tin bai hat hien thi len man hinh LCD.\n"
+            "Tham so:\n"
+            "  `title`: Ten bai hat\n"
+            "  `artist`: Ca si / Nhac si\n"
+            "  `platform`: Nen tang ('Spotify', 'YouTube Music', 'MP3 Online')\n"
+            "  `duration_sec`: Thoi luong bai hat tinh bang giay\n"
+            "  `audio_url`: (Tuy chon) URL luong am thanh truc tiep de loa phat ngay.",
             PropertyList({
                 Property("title", kPropertyTypeString),
                 Property("artist", kPropertyTypeString),
                 Property("platform", kPropertyTypeString, std::string("Spotify")),
-                Property("duration_sec", kPropertyTypeInteger, 210)
+                Property("duration_sec", kPropertyTypeInteger, 210),
+                Property("audio_url", kPropertyTypeString, std::string(""))
             }), [this](const PropertyList& properties) -> ReturnValue {
                 std::string title = properties["title"].value<std::string>();
                 std::string artist = properties["artist"].value<std::string>();
                 std::string platform = properties["platform"].value<std::string>();
                 int duration = properties["duration_sec"].value<int>();
+                std::string audio_url = properties["audio_url"].value<std::string>();
+
                 if (env_display_) {
                     env_display_->SetMusicTrack(title, artist, platform, duration);
-                    return true;
                 }
-                return false;
+
+                if (!audio_url.empty()) {
+                    ESP_LOGI(TAG, "Playing direct audio stream: %s", audio_url.c_str());
+                    Application::GetInstance().Schedule([audio_url]() {
+                        Application::GetInstance().StartNotification(audio_url, {});
+                    });
+                }
+
+                return std::string("{\"status\":\"success\"}");
             });
     }
 
